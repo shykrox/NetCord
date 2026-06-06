@@ -1,0 +1,71 @@
+services:
+
+  postgres:
+
+    image: postgres:17
+
+    container_name: netcord-postgres
+
+    restart: unless-stopped
+
+    environment:
+
+      POSTGRES_DB: netcord
+
+      POSTGRES_USER: netcord
+
+      POSTGRES_PASSWORD: Eden2008 
+
+    volumes:
+
+      - ./data/postgres:/var/lib/postgresql/data
+
+    ports:
+
+      - "127.0.0.1:5432:5432"
+
+
+
+  redis:
+
+    image: redis:7
+
+    container_name: netcord-redis
+
+    restart: unless-stopped
+
+    volumes:
+
+      - ./data/redis:/data
+
+    ports:
+
+      - "127.0.0.1:6379:6379"
+
+
+
+  minio:
+
+    image: minio/minio:latest
+
+    container_name: netcord-minio
+
+    restart: unless-stopped
+
+    command: server /data --console-address ":9001"
+
+    environment:
+
+      MINIO_ROOT_USER: netcord
+
+      MINIO_ROOT_PASSWORD: Eden2008 
+
+    volumes:
+
+      - ./data/minio:/data
+
+    ports:
+
+      - "9000:9000"
+
+      - "9001:9001"
