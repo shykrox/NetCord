@@ -23,7 +23,8 @@ type CreateChannelInput struct {
 }
 
 type CreateMessageInput struct {
-	Content string `json:"content"`
+	Content     string      `json:"content"`
+	Attachments []uuid.UUID `json:"attachments"`
 }
 
 type ServersResponse struct {
@@ -170,7 +171,7 @@ func (s *ServerService) CreateMessage(ctx context.Context, userID, channelID uui
 		Content:   input.Content,
 	}
 
-	created, err := s.servers.CreateMessage(ctx, message)
+	created, err := s.servers.CreateMessage(ctx, message, input.Attachments)
 	if err != nil {
 		return models.PublicMessage{}, mapRepositoryError(err)
 	}
@@ -181,7 +182,8 @@ func (s *ServerService) CreateMessage(ctx context.Context, userID, channelID uui
 func mapRepositoryError(err error) error {
 	switch {
 	case errors.Is(err, repository.ErrServerNotFound),
-		errors.Is(err, repository.ErrChannelNotFound):
+		errors.Is(err, repository.ErrChannelNotFound),
+		errors.Is(err, repository.ErrAttachmentNotFound):
 		return ErrNotFound
 	default:
 		return err

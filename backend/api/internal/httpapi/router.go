@@ -14,14 +14,16 @@ import (
 type Server struct {
 	authService   *service.AuthService
 	serverService *service.ServerService
+	fileService   *service.FileService
 	tokens        *auth.TokenManager
 	gatewayHub    *gateway.Hub
 }
 
-func NewRouter(authService *service.AuthService, serverService *service.ServerService, tokens *auth.TokenManager, gatewayHub *gateway.Hub) http.Handler {
+func NewRouter(authService *service.AuthService, serverService *service.ServerService, fileService *service.FileService, tokens *auth.TokenManager, gatewayHub *gateway.Hub) http.Handler {
 	server := &Server{
 		authService:   authService,
 		serverService: serverService,
+		fileService:   fileService,
 		tokens:        tokens,
 		gatewayHub:    gatewayHub,
 	}
@@ -32,6 +34,8 @@ func NewRouter(authService *service.AuthService, serverService *service.ServerSe
 	mux.HandleFunc("POST /auth/login", server.login)
 	mux.Handle("GET /users/me", protected(tokens, server.me))
 	mux.HandleFunc("GET /gateway/ws", server.gatewayWS)
+	mux.Handle("POST /files/upload", protected(tokens, server.uploadFile))
+	mux.Handle("GET /files/{file_id}", protected(tokens, server.getFile))
 
 	mux.Handle("POST /servers", protected(tokens, server.createServer))
 	mux.Handle("GET /servers", protected(tokens, server.listServers))

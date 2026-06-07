@@ -4,6 +4,8 @@ import (
 	"net/mail"
 	"strings"
 	"unicode"
+
+	"github.com/google/uuid"
 )
 
 func validateRegisterInput(input RegisterInput) map[string]string {
@@ -96,10 +98,27 @@ func validateCreateChannelInput(input CreateChannelInput) map[string]string {
 
 func validateCreateMessageInput(input CreateMessageInput) map[string]string {
 	fields := make(map[string]string)
-	if input.Content == "" {
-		fields["content"] = "message content is required"
+	if input.Content == "" && len(input.Attachments) == 0 {
+		fields["content"] = "message content or attachments are required"
 	} else if len(input.Content) > 4000 {
 		fields["content"] = "message content must be 4000 characters or fewer"
+	}
+	if len(input.Attachments) > 10 {
+		fields["attachments"] = "a message can include at most 10 attachments"
+	}
+
+	seen := make(map[string]struct{}, len(input.Attachments))
+	for _, attachmentID := range input.Attachments {
+		if attachmentID == uuid.Nil {
+			fields["attachments"] = "attachment ids must be valid"
+			break
+		}
+		key := attachmentID.String()
+		if _, ok := seen[key]; ok {
+			fields["attachments"] = "attachment ids must be unique"
+			break
+		}
+		seen[key] = struct{}{}
 	}
 	return fields
 }

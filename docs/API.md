@@ -194,7 +194,17 @@ Response `200 OK`:
 
 ```json
 {
-  "messages": []
+  "messages": [
+    {
+      "id": "uuid",
+      "server_id": "uuid",
+      "channel_id": "uuid",
+      "author_id": "uuid",
+      "content": "hello",
+      "attachments": [],
+      "created_at": "timestamp"
+    }
+  ]
 }
 ```
 
@@ -208,7 +218,8 @@ Request:
 
 ```json
 {
-  "content": "hello"
+  "content": "hello",
+  "attachments": ["attachment-uuid"]
 }
 ```
 
@@ -221,6 +232,51 @@ Response `201 Created`:
   "channel_id": "uuid",
   "author_id": "uuid",
   "content": "hello",
+  "attachments": [
+    {
+      "id": "uuid",
+      "original_filename": "hello.txt",
+      "content_type": "text/plain; charset=utf-8",
+      "size_bytes": 12,
+      "download_url": "/files/uuid",
+      "created_at": "timestamp"
+    }
+  ],
   "created_at": "timestamp"
 }
 ```
+
+`attachments` is optional. Each attachment ID must come from `POST /files/upload`, must belong to the authenticated user, and must not already be attached to another message.
+
+## POST /files/upload
+
+Requires `Authorization: Bearer <token>`.
+
+Uploads one private attachment object to MinIO using `multipart/form-data`.
+
+Request:
+
+```text
+file=<binary file>
+```
+
+Response `201 Created`:
+
+```json
+{
+  "id": "uuid",
+  "original_filename": "hello.txt",
+  "content_type": "text/plain; charset=utf-8",
+  "size_bytes": 12,
+  "download_url": "/files/uuid",
+  "created_at": "timestamp"
+}
+```
+
+The API detects MIME type server-side and stores the object using a non-predictable MinIO object key. Bucket and object key are never returned to clients.
+
+## GET /files/{id}
+
+Requires `Authorization: Bearer <token>`.
+
+Downloads an attachment through the API. The authenticated user can access the file if they uploaded it or if it is attached to a message in a server where they are a member.

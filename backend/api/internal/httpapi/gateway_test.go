@@ -29,7 +29,7 @@ func TestGatewayWebSocketHelloAndHeartbeat(t *testing.T) {
 
 	tokenManager := newTestTokenManager(t)
 	token := newTestToken(t, tokenManager, userID)
-	router := NewRouter(nil, service.NewServerService(repo), tokenManager, gateway.NewHub())
+	router := NewRouter(nil, service.NewServerService(repo), nil, tokenManager, gateway.NewHub())
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -78,7 +78,7 @@ func TestCreateMessageBroadcastsGatewayEvent(t *testing.T) {
 	token := newTestToken(t, tokenManager, userID)
 	hub := gateway.NewHub()
 	client := hub.Register(userID, []uuid.UUID{serverID})
-	router := NewRouter(nil, service.NewServerService(repo), tokenManager, hub)
+	router := NewRouter(nil, service.NewServerService(repo), nil, tokenManager, hub)
 
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -208,7 +208,7 @@ func (r *httpFakeServerRepository) GetChannelForUser(ctx context.Context, channe
 	return channel, nil
 }
 
-func (r *httpFakeServerRepository) CreateMessage(ctx context.Context, message models.Message) (models.Message, error) {
+func (r *httpFakeServerRepository) CreateMessage(ctx context.Context, message models.Message, attachmentIDs []uuid.UUID) (models.Message, error) {
 	message.CreatedAt = time.Now().UTC()
 	message.UpdatedAt = message.CreatedAt
 	r.messages = append(r.messages, message)

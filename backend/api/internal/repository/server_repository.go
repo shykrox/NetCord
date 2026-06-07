@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -20,8 +21,13 @@ type ServerRepository interface {
 	CreateChannel(ctx context.Context, channel models.Channel) (models.Channel, error)
 	ListChannelsForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.Channel, error)
 	GetChannelForUser(ctx context.Context, channelID, userID uuid.UUID) (models.Channel, error)
-	CreateMessage(ctx context.Context, message models.Message) (models.Message, error)
+	CreateMessage(ctx context.Context, message models.Message, attachmentIDs []uuid.UUID) (models.Message, error)
 	ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, limit int) ([]models.Message, error)
+}
+
+type FileRepository interface {
+	CreateAttachment(ctx context.Context, attachment models.MessageAttachment) (models.MessageAttachment, error)
+	GetAttachmentForUser(ctx context.Context, attachmentID, userID uuid.UUID) (models.MessageAttachment, error)
 }
 
 type PostgresServerRepository struct {
@@ -152,14 +158,55 @@ func (r *PostgresServerRepository) GetChannelForUser(ctx context.Context, channe
 	return channel, nil
 }
 
-func (r *PostgresServerRepository) CreateMessage(ctx context.Context, message models.Message) (models.Message, error) {
-	row := r.pool.QueryRow(ctx, `
+func (r *PostgresServerRepository) CreateMessage(ctx context.Context, message models.Message, attachmentIDs []uuid.UUID) (models.Message, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return models.Message{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	row := tx.QueryRow(ctx, `
 		INSERT INTO messages (id, server_id, channel_id, author_id, content)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, server_id, channel_id, author_id, content, created_at, updated_at
 	`, message.ID, message.ServerID, message.ChannelID, message.AuthorID, message.Content)
 
-	return scanMessage(row)
+	created, err := scanMessage(row)
+	if err != nil {
+		return models.Message{}, err
+	}
+
+	if len(attachmentIDs) > 0 {
+		rows, err := tx.Query(ctx, `
+			UPDATE message_attachments
+			SET message_id = $1, server_id = $2, channel_id = $3
+			WHERE id = ANY($4)
+				AND uploader_id = $5
+				AND message_id IS NULL
+			RETURNING id, uploader_id, message_id, server_id, channel_id, bucket, object_key,
+				original_filename, content_type, size_bytes, created_at
+		`, created.ID, created.ServerID, created.ChannelID, attachmentIDs, created.AuthorID)
+		if err != nil {
+			return models.Message{}, err
+		}
+
+		attachments, err := scanAttachments(rows)
+		if err != nil {
+			return models.Message{}, err
+		}
+		if len(attachments) != len(attachmentIDs) {
+			return models.Message{}, ErrAttachmentNotFound
+		}
+		created.Attachments = attachments
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return models.Message{}, err
+	}
+
+	return created, nil
 }
 
 func (r *PostgresServerRepository) ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, limit int) ([]models.Message, error) {
@@ -177,7 +224,53 @@ func (r *PostgresServerRepository) ListMessagesForChannelUser(ctx context.Contex
 	}
 	defer rows.Close()
 
-	return scanMessages(rows)
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := r.hydrateMessageAttachments(ctx, messages); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+func (r *PostgresServerRepository) CreateAttachment(ctx context.Context, attachment models.MessageAttachment) (models.MessageAttachment, error) {
+	row := r.pool.QueryRow(ctx, `
+		INSERT INTO message_attachments (
+			id, uploader_id, bucket, object_key, original_filename, content_type, size_bytes
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, uploader_id, message_id, server_id, channel_id, bucket, object_key,
+			original_filename, content_type, size_bytes, created_at
+	`, attachment.ID, attachment.UploaderID, attachment.Bucket, attachment.ObjectKey,
+		attachment.OriginalFilename, attachment.ContentType, attachment.SizeBytes)
+
+	created, err := scanAttachment(row)
+	if err != nil {
+		return models.MessageAttachment{}, err
+	}
+	return created, nil
+}
+
+func (r *PostgresServerRepository) GetAttachmentForUser(ctx context.Context, attachmentID, userID uuid.UUID) (models.MessageAttachment, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT ma.id, ma.uploader_id, ma.message_id, ma.server_id, ma.channel_id, ma.bucket, ma.object_key,
+			ma.original_filename, ma.content_type, ma.size_bytes, ma.created_at
+		FROM message_attachments ma
+		LEFT JOIN server_members sm ON sm.server_id = ma.server_id AND sm.user_id = $2
+		WHERE ma.id = $1 AND (ma.uploader_id = $2 OR sm.user_id = $2)
+	`, attachmentID, userID)
+
+	attachment, err := scanAttachment(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.MessageAttachment{}, ErrAttachmentNotFound
+		}
+		return models.MessageAttachment{}, err
+	}
+	return attachment, nil
 }
 
 func scanServer(row pgx.Row) (models.Server, error) {
@@ -274,4 +367,102 @@ func scanMessages(rows pgx.Rows) ([]models.Message, error) {
 		return nil, err
 	}
 	return messages, nil
+}
+
+func (r *PostgresServerRepository) hydrateMessageAttachments(ctx context.Context, messages []models.Message) error {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	messageIDs := make([]uuid.UUID, 0, len(messages))
+	messageIndex := make(map[uuid.UUID]int, len(messages))
+	for i, message := range messages {
+		messageIDs = append(messageIDs, message.ID)
+		messageIndex[message.ID] = i
+	}
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT id, uploader_id, message_id, server_id, channel_id, bucket, object_key,
+			original_filename, content_type, size_bytes, created_at
+		FROM message_attachments
+		WHERE message_id = ANY($1)
+		ORDER BY created_at ASC
+	`, messageIDs)
+	if err != nil {
+		return err
+	}
+
+	attachments, err := scanAttachments(rows)
+	if err != nil {
+		return err
+	}
+
+	for _, attachment := range attachments {
+		if attachment.MessageID == nil {
+			continue
+		}
+		index, ok := messageIndex[*attachment.MessageID]
+		if !ok {
+			continue
+		}
+		messages[index].Attachments = append(messages[index].Attachments, attachment)
+	}
+
+	return nil
+}
+
+func scanAttachment(row pgx.Row) (models.MessageAttachment, error) {
+	var attachment models.MessageAttachment
+	var messageID pgtype.UUID
+	var serverID pgtype.UUID
+	var channelID pgtype.UUID
+
+	err := row.Scan(
+		&attachment.ID,
+		&attachment.UploaderID,
+		&messageID,
+		&serverID,
+		&channelID,
+		&attachment.Bucket,
+		&attachment.ObjectKey,
+		&attachment.OriginalFilename,
+		&attachment.ContentType,
+		&attachment.SizeBytes,
+		&attachment.CreatedAt,
+	)
+	if err != nil {
+		return models.MessageAttachment{}, err
+	}
+
+	attachment.MessageID = nullableUUID(messageID)
+	attachment.ServerID = nullableUUID(serverID)
+	attachment.ChannelID = nullableUUID(channelID)
+
+	return attachment, nil
+}
+
+func scanAttachments(rows pgx.Rows) ([]models.MessageAttachment, error) {
+	defer rows.Close()
+
+	attachments := make([]models.MessageAttachment, 0)
+	for rows.Next() {
+		attachment, err := scanAttachment(rows)
+		if err != nil {
+			return nil, err
+		}
+		attachments = append(attachments, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return attachments, nil
+}
+
+func nullableUUID(value pgtype.UUID) *uuid.UUID {
+	if !value.Valid {
+		return nil
+	}
+
+	id := uuid.UUID(value.Bytes)
+	return &id
 }

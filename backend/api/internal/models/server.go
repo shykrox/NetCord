@@ -78,31 +78,76 @@ func (c Channel) Public() PublicChannel {
 }
 
 type Message struct {
-	ID        uuid.UUID
-	ServerID  uuid.UUID
-	ChannelID uuid.UUID
-	AuthorID  uuid.UUID
-	Content   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID          uuid.UUID
+	ServerID    uuid.UUID
+	ChannelID   uuid.UUID
+	AuthorID    uuid.UUID
+	Content     string
+	Attachments []MessageAttachment
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type PublicMessage struct {
-	ID        uuid.UUID `json:"id"`
-	ServerID  uuid.UUID `json:"server_id"`
-	ChannelID uuid.UUID `json:"channel_id"`
-	AuthorID  uuid.UUID `json:"author_id"`
-	Content   string    `json:"content"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          uuid.UUID          `json:"id"`
+	ServerID    uuid.UUID          `json:"server_id"`
+	ChannelID   uuid.UUID          `json:"channel_id"`
+	AuthorID    uuid.UUID          `json:"author_id"`
+	Content     string             `json:"content"`
+	Attachments []PublicAttachment `json:"attachments"`
+	CreatedAt   time.Time          `json:"created_at"`
 }
 
 func (m Message) Public() PublicMessage {
 	return PublicMessage{
-		ID:        m.ID,
-		ServerID:  m.ServerID,
-		ChannelID: m.ChannelID,
-		AuthorID:  m.AuthorID,
-		Content:   m.Content,
-		CreatedAt: m.CreatedAt,
+		ID:          m.ID,
+		ServerID:    m.ServerID,
+		ChannelID:   m.ChannelID,
+		AuthorID:    m.AuthorID,
+		Content:     m.Content,
+		Attachments: publicAttachments(m.Attachments),
+		CreatedAt:   m.CreatedAt,
 	}
+}
+
+type MessageAttachment struct {
+	ID               uuid.UUID
+	UploaderID       uuid.UUID
+	MessageID        *uuid.UUID
+	ServerID         *uuid.UUID
+	ChannelID        *uuid.UUID
+	Bucket           string
+	ObjectKey        string
+	OriginalFilename string
+	ContentType      string
+	SizeBytes        int64
+	CreatedAt        time.Time
+}
+
+type PublicAttachment struct {
+	ID               uuid.UUID `json:"id"`
+	OriginalFilename string    `json:"original_filename"`
+	ContentType      string    `json:"content_type"`
+	SizeBytes        int64     `json:"size_bytes"`
+	DownloadURL      string    `json:"download_url"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+func (a MessageAttachment) Public() PublicAttachment {
+	return PublicAttachment{
+		ID:               a.ID,
+		OriginalFilename: a.OriginalFilename,
+		ContentType:      a.ContentType,
+		SizeBytes:        a.SizeBytes,
+		DownloadURL:      "/files/" + a.ID.String(),
+		CreatedAt:        a.CreatedAt,
+	}
+}
+
+func publicAttachments(attachments []MessageAttachment) []PublicAttachment {
+	public := make([]PublicAttachment, 0, len(attachments))
+	for _, attachment := range attachments {
+		public = append(public, attachment.Public())
+	}
+	return public
 }

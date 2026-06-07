@@ -89,6 +89,7 @@ Broadcast after `POST /channels/{channel_id}/messages` succeeds.
     "channel_id": "uuid",
     "author_id": "uuid",
     "content": "hello",
+    "attachments": [],
     "created_at": "timestamp"
   }
 }

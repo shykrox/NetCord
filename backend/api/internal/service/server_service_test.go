@@ -75,19 +75,61 @@ func TestCreateMessageStoresAuthorAndChannelServer(t *testing.T) {
 	}
 }
 
+func TestCreateMessageAttachesUploadedFiles(t *testing.T) {
+	repo := newFakeServerRepository()
+	service := NewServerService(repo)
+	userID := uuid.New()
+	serverID := uuid.New()
+	channelID := uuid.New()
+	attachmentID := uuid.New()
+	repo.servers[serverID] = models.Server{ID: serverID, OwnerID: userID, Name: "NetCord"}
+	repo.members[serverID] = map[uuid.UUID]string{userID: models.ServerRoleOwner}
+	repo.channels[channelID] = models.Channel{
+		ID:       channelID,
+		ServerID: serverID,
+		Name:     "general",
+		Type:     models.ChannelTypeText,
+	}
+	repo.attachments[attachmentID] = models.MessageAttachment{
+		ID:               attachmentID,
+		UploaderID:       userID,
+		Bucket:           "attachments",
+		ObjectKey:        "attachments/random/file",
+		OriginalFilename: "hello.txt",
+		ContentType:      "text/plain; charset=utf-8",
+		SizeBytes:        5,
+	}
+
+	message, err := service.CreateMessage(context.Background(), userID, channelID, CreateMessageInput{
+		Attachments: []uuid.UUID{attachmentID},
+	})
+	if err != nil {
+		t.Fatalf("create message: %v", err)
+	}
+
+	if len(message.Attachments) != 1 {
+		t.Fatalf("expected one attachment, got %d", len(message.Attachments))
+	}
+	if message.Attachments[0].ID != attachmentID {
+		t.Fatalf("expected attachment %s, got %s", attachmentID, message.Attachments[0].ID)
+	}
+}
+
 type fakeServerRepository struct {
-	servers  map[uuid.UUID]models.Server
-	members  map[uuid.UUID]map[uuid.UUID]string
-	channels map[uuid.UUID]models.Channel
-	messages []models.Message
+	servers     map[uuid.UUID]models.Server
+	members     map[uuid.UUID]map[uuid.UUID]string
+	channels    map[uuid.UUID]models.Channel
+	attachments map[uuid.UUID]models.MessageAttachment
+	messages    []models.Message
 }
 
 func newFakeServerRepository() *fakeServerRepository {
 	return &fakeServerRepository{
-		servers:  make(map[uuid.UUID]models.Server),
-		members:  make(map[uuid.UUID]map[uuid.UUID]string),
-		channels: make(map[uuid.UUID]models.Channel),
-		messages: make([]models.Message, 0),
+		servers:     make(map[uuid.UUID]models.Server),
+		members:     make(map[uuid.UUID]map[uuid.UUID]string),
+		channels:    make(map[uuid.UUID]models.Channel),
+		attachments: make(map[uuid.UUID]models.MessageAttachment),
+		messages:    make([]models.Message, 0),
 	}
 }
 
@@ -159,10 +201,24 @@ func (r *fakeServerRepository) GetChannelForUser(ctx context.Context, channelID,
 	return channel, nil
 }
 
-func (r *fakeServerRepository) CreateMessage(ctx context.Context, message models.Message) (models.Message, error) {
+func (r *fakeServerRepository) CreateMessage(ctx context.Context, message models.Message, attachmentIDs []uuid.UUID) (models.Message, error) {
 	now := time.Now().UTC()
 	message.CreatedAt = now
 	message.UpdatedAt = now
+	for _, attachmentID := range attachmentIDs {
+		attachment, ok := r.attachments[attachmentID]
+		if !ok || attachment.UploaderID != message.AuthorID || attachment.MessageID != nil {
+			return models.Message{}, repository.ErrAttachmentNotFound
+		}
+		messageID := message.ID
+		serverID := message.ServerID
+		channelID := message.ChannelID
+		attachment.MessageID = &messageID
+		attachment.ServerID = &serverID
+		attachment.ChannelID = &channelID
+		r.attachments[attachmentID] = attachment
+		message.Attachments = append(message.Attachments, attachment)
+	}
 	r.messages = append(r.messages, message)
 	return message, nil
 }

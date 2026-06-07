@@ -32,7 +32,6 @@ Planned later:
 
 - direct_conversations
 - direct_conversation_members
-- attachments
 - roles
 - permissions
 - reactions
@@ -97,3 +96,31 @@ CREATE TABLE messages (
         REFERENCES channels(id, server_id) ON DELETE CASCADE
 );
 ```
+
+## message_attachments
+
+```sql
+CREATE TABLE message_attachments (
+    id UUID PRIMARY KEY,
+    uploader_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    message_id UUID REFERENCES messages(id) ON DELETE CASCADE,
+    server_id UUID REFERENCES servers(id) ON DELETE CASCADE,
+    channel_id UUID,
+    bucket TEXT NOT NULL,
+    object_key TEXT NOT NULL UNIQUE,
+    original_filename TEXT NOT NULL,
+    content_type TEXT NOT NULL,
+    size_bytes BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT message_attachments_size_check CHECK (size_bytes > 0),
+    CONSTRAINT message_attachments_channel_server_fk FOREIGN KEY (channel_id, server_id)
+        REFERENCES channels(id, server_id) ON DELETE CASCADE,
+    CONSTRAINT message_attachments_attached_consistency CHECK (
+        (message_id IS NULL AND server_id IS NULL AND channel_id IS NULL)
+        OR
+        (message_id IS NOT NULL AND server_id IS NOT NULL AND channel_id IS NOT NULL)
+    )
+);
+```
+
+Objects are stored privately in the configured MinIO bucket. The database stores the internal bucket/object key, but API responses expose only attachment IDs and `/files/{id}` download URLs.

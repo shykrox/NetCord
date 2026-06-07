@@ -14,6 +14,7 @@ import (
 	"netcord/backend/api/internal/httpapi"
 	"netcord/backend/api/internal/repository"
 	"netcord/backend/api/internal/service"
+	"netcord/backend/api/internal/storage"
 )
 
 func main() {
@@ -36,10 +37,21 @@ func main() {
 
 	userRepo := repository.NewPostgresUserRepository(pool)
 	serverRepo := repository.NewPostgresServerRepository(pool)
+	objectStore, err := storage.NewMinIOObjectStore(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey)
+	if err != nil {
+		logger.Error("configure minio", "error", err)
+		os.Exit(1)
+	}
+	if err := objectStore.EnsureBucket(ctx, cfg.MinIOBucketAttachments); err != nil {
+		logger.Error("prepare minio attachments bucket", "error", err)
+		os.Exit(1)
+	}
+
 	authService := service.NewAuthService(userRepo, tokenManager)
 	serverService := service.NewServerService(serverRepo)
+	fileService := service.NewFileService(serverRepo, objectStore, cfg.MinIOBucketAttachments, cfg.MaxUploadBytes)
 	gatewayHub := gateway.NewHub()
-	router := httpapi.NewRouter(authService, serverService, tokenManager, gatewayHub)
+	router := httpapi.NewRouter(authService, serverService, fileService, tokenManager, gatewayHub)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
