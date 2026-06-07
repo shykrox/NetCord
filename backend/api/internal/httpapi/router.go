@@ -11,41 +11,32 @@ import (
 )
 
 type Server struct {
-	authService *service.AuthService
+	authService   *service.AuthService
+	serverService *service.ServerService
 }
 
-func NewRouter(authService *service.AuthService, tokens *auth.TokenManager) http.Handler {
-	server := &Server{authService: authService}
+func NewRouter(authService *service.AuthService, serverService *service.ServerService, tokens *auth.TokenManager) http.Handler {
+	server := &Server{authService: authService, serverService: serverService}
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/health", method(http.MethodGet, server.health))
-	mux.HandleFunc("/auth/register", method(http.MethodPost, server.register))
-	mux.HandleFunc("/auth/login", method(http.MethodPost, server.login))
-	mux.Handle("/users/me", methodHandler(http.MethodGet, middleware.RequireAuth(tokens)(http.HandlerFunc(server.me))))
+	mux.HandleFunc("GET /health", server.health)
+	mux.HandleFunc("POST /auth/register", server.register)
+	mux.HandleFunc("POST /auth/login", server.login)
+	mux.Handle("GET /users/me", protected(tokens, server.me))
+
+	mux.Handle("POST /servers", protected(tokens, server.createServer))
+	mux.Handle("GET /servers", protected(tokens, server.listServers))
+	mux.Handle("GET /servers/{server_id}", protected(tokens, server.getServer))
+	mux.Handle("POST /servers/{server_id}/channels", protected(tokens, server.createChannel))
+	mux.Handle("GET /servers/{server_id}/channels", protected(tokens, server.listChannels))
+	mux.Handle("GET /channels/{channel_id}/messages", protected(tokens, server.listMessages))
+	mux.Handle("POST /channels/{channel_id}/messages", protected(tokens, server.createMessage))
 
 	return mux
 }
 
-func method(allowed string, handler http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != allowed {
-			w.Header().Set("Allow", allowed)
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
-			return
-		}
-		handler(w, r)
-	}
-}
-
-func methodHandler(allowed string, handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != allowed {
-			w.Header().Set("Allow", allowed)
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
-			return
-		}
-		handler.ServeHTTP(w, r)
-	})
+func protected(tokens *auth.TokenManager, handler http.HandlerFunc) http.Handler {
+	return middleware.RequireAuth(tokens)(http.HandlerFunc(handler))
 }
 
 func (s *Server) writeServiceError(w http.ResponseWriter, err error) {
@@ -55,6 +46,8 @@ func (s *Server) writeServiceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "validation_error", "request validation failed", validation.Fields)
 	case errors.Is(err, service.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", "invalid email or password", nil)
+	case errors.Is(err, service.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", "resource not found", nil)
 	case errors.Is(err, repository.ErrUserNotFound):
 		writeError(w, http.StatusNotFound, "user_not_found", "user not found", nil)
 	default:

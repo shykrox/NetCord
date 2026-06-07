@@ -58,3 +58,48 @@ func validatePassword(password string) string {
 	}
 	return ""
 }
+
+func validateCreateServerInput(input CreateServerInput) map[string]string {
+	fields := make(map[string]string)
+	if input.Name == "" {
+		fields["name"] = "server name is required"
+	} else if len(input.Name) > 80 {
+		fields["name"] = "server name must be 80 characters or fewer"
+	}
+
+	if len(input.Description) > 500 {
+		fields["description"] = "description must be 500 characters or fewer"
+	}
+
+	return fields
+}
+
+func validateCreateChannelInput(input CreateChannelInput) map[string]string {
+	fields := make(map[string]string)
+	if input.Name == "" {
+		fields["name"] = "channel name is required"
+		return fields
+	}
+	if len(input.Name) > 64 {
+		fields["name"] = "channel name must be 64 characters or fewer"
+		return fields
+	}
+	for _, r := range input.Name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-' {
+			continue
+		}
+		fields["name"] = "channel name can contain only letters, numbers, underscores, and hyphens"
+		return fields
+	}
+	return fields
+}
+
+func validateCreateMessageInput(input CreateMessageInput) map[string]string {
+	fields := make(map[string]string)
+	if input.Content == "" {
+		fields["content"] = "message content is required"
+	} else if len(input.Content) > 4000 {
+		fields["content"] = "message content must be 4000 characters or fewer"
+	}
+	return fields
+}

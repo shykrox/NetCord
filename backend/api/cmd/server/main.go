@@ -34,8 +34,10 @@ func main() {
 	}
 
 	userRepo := repository.NewPostgresUserRepository(pool)
+	serverRepo := repository.NewPostgresServerRepository(pool)
 	authService := service.NewAuthService(userRepo, tokenManager)
-	router := httpapi.NewRouter(authService, tokenManager)
+	serverService := service.NewServerService(serverRepo)
+	router := httpapi.NewRouter(authService, serverService, tokenManager)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

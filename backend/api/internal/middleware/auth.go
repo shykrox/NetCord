@@ -32,6 +32,11 @@ func RequireAuth(tokens *auth.TokenManager) func(http.Handler) http.Handler {
 				return
 			}
 
+			if tokens == nil {
+				writeUnauthorized(w)
+				return
+			}
+
 			userID, err := tokens.Validate(tokenString)
 			if err != nil {
 				writeUnauthorized(w)
