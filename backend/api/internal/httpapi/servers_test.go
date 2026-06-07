@@ -7,7 +7,7 @@ import (
 )
 
 func TestServerRoutesRequireAuth(t *testing.T) {
-	router := NewRouter(nil, nil, nil)
+	router := NewRouter(nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodGet, "/servers", nil)
 	response := httptest.NewRecorder()
 

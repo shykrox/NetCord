@@ -10,6 +10,7 @@ import (
 	"netcord/backend/api/internal/auth"
 	"netcord/backend/api/internal/config"
 	"netcord/backend/api/internal/db"
+	"netcord/backend/api/internal/gateway"
 	"netcord/backend/api/internal/httpapi"
 	"netcord/backend/api/internal/repository"
 	"netcord/backend/api/internal/service"
@@ -37,7 +38,8 @@ func main() {
 	serverRepo := repository.NewPostgresServerRepository(pool)
 	authService := service.NewAuthService(userRepo, tokenManager)
 	serverService := service.NewServerService(serverRepo)
-	router := httpapi.NewRouter(authService, serverService, tokenManager)
+	gatewayHub := gateway.NewHub()
+	router := httpapi.NewRouter(authService, serverService, tokenManager, gatewayHub)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

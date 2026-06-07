@@ -154,6 +154,10 @@ func (s *Server) createMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if s.gatewayHub != nil {
+		s.gatewayHub.BroadcastMessageCreated(message)
+	}
+
 	writeJSON(w, http.StatusCreated, message)
 }
 

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"netcord/backend/api/internal/auth"
+	"netcord/backend/api/internal/gateway"
 	"netcord/backend/api/internal/middleware"
 	"netcord/backend/api/internal/repository"
 	"netcord/backend/api/internal/service"
@@ -13,16 +14,24 @@ import (
 type Server struct {
 	authService   *service.AuthService
 	serverService *service.ServerService
+	tokens        *auth.TokenManager
+	gatewayHub    *gateway.Hub
 }
 
-func NewRouter(authService *service.AuthService, serverService *service.ServerService, tokens *auth.TokenManager) http.Handler {
-	server := &Server{authService: authService, serverService: serverService}
+func NewRouter(authService *service.AuthService, serverService *service.ServerService, tokens *auth.TokenManager, gatewayHub *gateway.Hub) http.Handler {
+	server := &Server{
+		authService:   authService,
+		serverService: serverService,
+		tokens:        tokens,
+		gatewayHub:    gatewayHub,
+	}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", server.health)
 	mux.HandleFunc("POST /auth/register", server.register)
 	mux.HandleFunc("POST /auth/login", server.login)
 	mux.Handle("GET /users/me", protected(tokens, server.me))
+	mux.HandleFunc("GET /gateway/ws", server.gatewayWS)
 
 	mux.Handle("POST /servers", protected(tokens, server.createServer))
 	mux.Handle("GET /servers", protected(tokens, server.listServers))
