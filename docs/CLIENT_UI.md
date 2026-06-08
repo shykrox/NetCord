@@ -19,6 +19,7 @@ Current UI includes:
 - typing indicator
 - WebSocket status
 - file drag-and-drop upload
+- protected attachment download through the Qt client cache
 - right-side members, roles, social, DMs, AI jobs, voice controls
 - local SQLite cache
 
@@ -28,8 +29,11 @@ Current UI includes:
 - `VoiceControls.qml`
 - `VoiceParticipantList.qml`
 - `VoiceDeviceSettings.qml`
+- `VoicePanel.qml`
+- `CameraPreview.qml`
+- `ScreenSharePicker.qml`
 
-These are UI/state components. Real LiveKit audio is not implemented yet.
+These are UI/state components for mute/deafen/camera/share/device selection. Real LiveKit audio/video/screen streaming is not implemented yet.
 
 ## Roles and Invites
 

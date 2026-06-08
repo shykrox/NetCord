@@ -100,6 +100,7 @@ public:
     Q_INVOKABLE void clearCache();
     Q_INVOKABLE void sendTypingStart();
     Q_INVOKABLE void sendTypingStop();
+    Q_INVOKABLE void downloadAttachment(const QString &fileId, const QString &originalFilename);
     Q_INVOKABLE void openAttachment(const QString &downloadUrl);
     Q_INVOKABLE void loadFriends();
     Q_INVOKABLE void loadFriendRequests();

@@ -12,11 +12,7 @@ Auth:
 Authorization: Bearer <token>
 ```
 
-or:
-
-```text
-ws://127.0.0.1:8080/gateway/ws?token=<jwt>
-```
+Do not put JWTs in URLs. The Qt client opens the WebSocket with an `Authorization` header.
 
 All messages are JSON:
 

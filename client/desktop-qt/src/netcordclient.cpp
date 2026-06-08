@@ -10,6 +10,8 @@
 #include <QJsonDocument>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QSaveFile>
+#include <QDebug>
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QStandardPaths>
@@ -31,6 +33,93 @@ QString normalizedBaseUrl(const QString &value)
         trimmed.chop(1);
     }
     return trimmed;
+}
+
+QString safeCacheFilename(const QString &fileId, const QString &originalFilename)
+{
+    QString name = QFileInfo(originalFilename).fileName().trimmed();
+    if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral("..")) {
+        name = QStringLiteral("attachment");
+    }
+
+    for (QChar &ch : name) {
+        if (ch.isLetterOrNumber() || ch == QLatin1Char('.') || ch == QLatin1Char('-') || ch == QLatin1Char('_')) {
+            continue;
+        }
+        ch = QLatin1Char('_');
+    }
+    while (name.contains(QStringLiteral(".."))) {
+        name.replace(QStringLiteral(".."), QStringLiteral("."));
+    }
+    if (name.size() > 120) {
+        const QString suffix = QFileInfo(name).suffix();
+        name = name.left(100);
+        if (!suffix.isEmpty()) {
+            name += QStringLiteral(".") + suffix.left(16);
+        }
+    }
+
+    QString safeId = fileId;
+    for (QChar &ch : safeId) {
+        if (!(ch.isLetterOrNumber() || ch == QLatin1Char('-') || ch == QLatin1Char('_'))) {
+            ch = QLatin1Char('_');
+        }
+    }
+    return safeId + QStringLiteral("_") + name;
+}
+
+QString fileIdFromDownloadPath(const QString &downloadUrl)
+{
+    QString value = downloadUrl.trimmed();
+    if (value.startsWith(QStringLiteral("/files/"))) {
+        return value.mid(QStringLiteral("/files/").size());
+    }
+    const QUrl url(value);
+    if (url.isValid() && url.path().startsWith(QStringLiteral("/files/"))) {
+        return url.path().mid(QStringLiteral("/files/").size());
+    }
+    return value;
+}
+
+QString attachmentCacheDir()
+{
+    const QString base = QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    return (base.isEmpty() ? QDir::tempPath() + QStringLiteral("/NetCord") : base) + QStringLiteral("/attachments");
+}
+
+void pruneAttachmentCache(qint64 maxBytes = 512LL * 1024LL * 1024LL)
+{
+    QDir dir(attachmentCacheDir());
+    const QFileInfoList files = dir.entryInfoList(QDir::Files, QDir::Time | QDir::Reversed);
+    qint64 total = 0;
+    for (const QFileInfo &file : files) {
+        total += file.size();
+    }
+    for (const QFileInfo &file : files) {
+        if (total <= maxBytes) {
+            break;
+        }
+        total -= file.size();
+        QFile::remove(file.absoluteFilePath());
+    }
+}
+
+QString operationName(QNetworkAccessManager::Operation operation)
+{
+    switch (operation) {
+    case QNetworkAccessManager::GetOperation:
+        return QStringLiteral("GET");
+    case QNetworkAccessManager::PostOperation:
+        return QStringLiteral("POST");
+    case QNetworkAccessManager::PutOperation:
+        return QStringLiteral("PUT");
+    case QNetworkAccessManager::DeleteOperation:
+        return QStringLiteral("DELETE");
+    case QNetworkAccessManager::CustomOperation:
+        return QStringLiteral("CUSTOM");
+    default:
+        return QStringLiteral("UNKNOWN");
+    }
 }
 }
 
@@ -647,12 +736,65 @@ void NetCordClient::sendTypingStop()
     m_typingStopTimer.stop();
 }
 
-void NetCordClient::openAttachment(const QString &downloadUrl)
+void NetCordClient::downloadAttachment(const QString &fileId, const QString &originalFilename)
 {
-    if (downloadUrl.isEmpty()) {
+    const QString id = fileIdFromDownloadPath(fileId);
+    if (id.isEmpty()) {
+        setStatusMessage(QStringLiteral("Impossible d'ouvrir le fichier : identifiant manquant"));
         return;
     }
-    QDesktopServices::openUrl(apiUrl(downloadUrl));
+
+    const QString dirPath = attachmentCacheDir();
+    QDir().mkpath(dirPath);
+    const QString localPath = dirPath + QLatin1Char('/') + safeCacheFilename(id, originalFilename);
+
+    if (QFileInfo::exists(localPath) && QFileInfo(localPath).size() > 0) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+        return;
+    }
+
+    beginRequest();
+    const QString route = QStringLiteral("/files/%1").arg(id);
+    QNetworkReply *reply = m_network.get(makeRequest(route, true, false));
+    connect(reply, &QNetworkReply::finished, this, [this, reply, route, localPath]() {
+        const QByteArray body = reply->readAll();
+        const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QString networkError = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
+        reply->deleteLater();
+        endRequest();
+
+        if (statusCode >= 200 && statusCode < 300) {
+            QSaveFile file(localPath);
+            if (!file.open(QIODevice::WriteOnly)) {
+                setStatusMessage(QStringLiteral("Impossible d'enregistrer le fichier en cache"));
+                return;
+            }
+            if (file.write(body) != body.size() || !file.commit()) {
+                setStatusMessage(QStringLiteral("Impossible d'enregistrer le fichier en cache"));
+                return;
+            }
+            pruneAttachmentCache();
+            QDesktopServices::openUrl(QUrl::fromLocalFile(localPath));
+            return;
+        }
+
+        const QJsonObject payload = QJsonDocument::fromJson(body).object();
+        qWarning() << "NetCord request failed"
+                   << "method=GET"
+                   << "route=" << route
+                   << "status=" << statusCode
+                   << "body=" << QString::fromUtf8(body.left(500));
+        if (statusCode == 401) {
+            clearSession(true);
+        }
+        const QString message = errorMessageFromPayload(payload, statusCode, networkError);
+        setStatusMessage(QStringLiteral("Impossible d'ouvrir le fichier : %1").arg(message));
+    });
+}
+
+void NetCordClient::openAttachment(const QString &downloadUrl)
+{
+    downloadAttachment(fileIdFromDownloadPath(downloadUrl), QStringLiteral("attachment"));
 }
 
 void NetCordClient::loadFriends()
@@ -786,7 +928,14 @@ QUrl NetCordClient::apiUrl(const QString &path) const
     if (basePath.endsWith('/')) {
         basePath.chop(1);
     }
-    url.setPath(basePath + path);
+    const int queryIndex = path.indexOf(QLatin1Char('?'));
+    if (queryIndex >= 0) {
+        url.setPath(basePath + path.left(queryIndex));
+        url.setQuery(path.mid(queryIndex + 1));
+    } else {
+        url.setPath(basePath + path);
+        url.setQuery(QString());
+    }
     return url;
 }
 
@@ -804,9 +953,6 @@ QUrl NetCordClient::gatewayUrl() const
         basePath.chop(1);
     }
     url.setPath(basePath + QStringLiteral("/gateway/ws"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("token"), m_token);
-    url.setQuery(query);
     return url;
 }
 
@@ -863,6 +1009,8 @@ void NetCordClient::handleReply(QNetworkReply *reply, bool withAuth, JsonCallbac
     const QByteArray body = reply->readAll();
     const int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
     const QString networkError = reply->error() == QNetworkReply::NoError ? QString() : reply->errorString();
+    const QString method = operationName(reply->operation());
+    const QString route = reply->url().path();
     const QJsonDocument document = QJsonDocument::fromJson(body);
     const QJsonObject payload = document.object();
     reply->deleteLater();
@@ -876,6 +1024,11 @@ void NetCordClient::handleReply(QNetworkReply *reply, bool withAuth, JsonCallbac
     if (withAuth && statusCode == 401) {
         clearSession(true);
     }
+    qWarning() << "NetCord request failed"
+               << "method=" << method
+               << "route=" << route
+               << "status=" << statusCode
+               << "body=" << QString::fromUtf8(body.left(500));
     setStatusMessage(errorMessageFromPayload(payload, statusCode, networkError));
 }
 
@@ -908,7 +1061,9 @@ void NetCordClient::connectGateway()
         m_gateway.abort();
     }
     m_manualGatewayClose = false;
-    m_gateway.open(gatewayUrl());
+    QNetworkRequest request(gatewayUrl());
+    request.setRawHeader("Authorization", QByteArrayLiteral("Bearer ") + m_token.toUtf8());
+    m_gateway.open(request);
 }
 
 void NetCordClient::disconnectGateway()
@@ -1126,6 +1281,15 @@ void NetCordClient::cacheMessages(const QString &channelId, const QVariantList &
         query.addBindValue(message.value(QStringLiteral("created_at")).toString());
         query.exec();
     }
+
+    QSqlQuery prune(m_cache);
+    prune.prepare(QStringLiteral(
+        "DELETE FROM messages WHERE channel_id = ? AND id NOT IN ("
+        "SELECT id FROM messages WHERE channel_id = ? ORDER BY created_at DESC LIMIT 200"
+        ")"));
+    prune.addBindValue(channelId);
+    prune.addBindValue(channelId);
+    prune.exec();
 }
 
 QVariantList NetCordClient::cachedServers() const
@@ -1418,7 +1582,17 @@ void NetCordClient::clearSession(bool clearStoredToken)
 QString NetCordClient::errorMessageFromPayload(const QJsonObject &payload, int statusCode, const QString &networkError) const
 {
     const QJsonObject error = payload.value(QStringLiteral("error")).toObject();
-    const QString message = error.value(QStringLiteral("message")).toString();
+    QString message = error.value(QStringLiteral("message")).toString();
+    const QJsonObject fields = error.value(QStringLiteral("fields")).toObject();
+    if (!fields.isEmpty()) {
+        const QString firstKey = fields.keys().first();
+        const QString fieldMessage = fields.value(firstKey).toString();
+        if (!fieldMessage.isEmpty()) {
+            message = message.isEmpty()
+                ? QStringLiteral("%1: %2").arg(firstKey, fieldMessage)
+                : QStringLiteral("%1 (%2: %3)").arg(message, firstKey, fieldMessage);
+        }
+    }
     if (!message.isEmpty()) {
         return message;
     }

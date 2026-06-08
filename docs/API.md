@@ -60,7 +60,7 @@ Only text channels accept messages. Delete is soft delete; deleted messages are 
 - `POST /files/upload` as `multipart/form-data` field `file`
 - `GET /files/{id}`
 
-Files are stored privately in MinIO/S3. API responses expose only attachment IDs and `/files/{id}` download URLs.
+Files are stored privately in MinIO/S3. API responses expose only attachment IDs and `/files/{id}` download paths. Clients must download them with `Authorization: Bearer <token>`; do not open these paths directly in an external browser.
 
 ## Friends and DMs
 

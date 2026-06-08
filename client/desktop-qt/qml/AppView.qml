@@ -438,125 +438,17 @@ Rectangle {
                     onCountChanged: Qt.callLater(function() { messageList.positionViewAtEnd() })
                     onHeightChanged: Qt.callLater(function() { messageList.positionViewAtEnd() })
 
-                    delegate: Rectangle {
+                    delegate: MessageItem {
                         width: messageList.width
-                        implicitHeight: messageColumn.implicitHeight + 16
-                        color: "transparent"
-
-                        ColumnLayout {
-                            id: messageColumn
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.leftMargin: 20
-                            anchors.rightMargin: 20
-                            spacing: 4
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-
-                                Rectangle {
-                                    Layout.preferredWidth: 34
-                                    Layout.preferredHeight: 34
-                                    radius: 10
-                                    color: "#2b3240"
-
-                                    Label {
-                                        anchors.centerIn: parent
-                                        text: (modelData.author_id || "?").substring(0, 2).toUpperCase()
-                                        color: "#c7d0df"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                    }
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    spacing: 3
-
-                                    Label {
-                                        text: (modelData.author_id || "").substring(0, 8)
-                                        color: "#dce2ec"
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-
-                                    Label {
-                                        text: modelData.content || ""
-                                        visible: text.length > 0
-                                        color: "#eef2f7"
-                                        wrapMode: Text.Wrap
-                                        Layout.fillWidth: true
-                                    }
-
-                                    RowLayout {
-                                        spacing: 6
-
-                                        Button {
-                                            text: "Edit"
-                                            visible: modelData.author_id === netcord.currentUser.id
-                                            Layout.preferredHeight: 26
-                                            onClicked: {
-                                                appRoot.editMessageId = modelData.id
-                                                editMessageText.text = modelData.content || ""
-                                                editMessageDialog.open()
-                                            }
-                                        }
-
-                                        Button {
-                                            text: "Delete"
-                                            visible: modelData.author_id === netcord.currentUser.id
-                                            Layout.preferredHeight: 26
-                                            onClicked: netcord.deleteMessage(modelData.id)
-                                        }
-
-                                        Label {
-                                            text: modelData.edited_at ? "edited" : ""
-                                            color: "#788498"
-                                            font.pixelSize: 11
-                                        }
-                                    }
-
-                                    Repeater {
-                                        model: modelData.attachments || []
-
-                                        delegate: Rectangle {
-                                            Layout.fillWidth: true
-                                            implicitHeight: 34
-                                            radius: 6
-                                            color: "#202632"
-                                            border.color: "#303746"
-
-                                            RowLayout {
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 10
-                                                anchors.rightMargin: 10
-                                                spacing: 8
-
-                                                Label {
-                                                    text: modelData.original_filename
-                                                    color: "#d8e0ea"
-                                                    elide: Text.ElideRight
-                                                    Layout.fillWidth: true
-                                                }
-
-                                                Label {
-                                                    text: Math.ceil((modelData.size_bytes || 0) / 1024) + " KB"
-                                                    color: "#91a0b5"
-                                                }
-                                            }
-
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                onClicked: netcord.openAttachment(modelData.download_url)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        message: modelData
+                        currentUserId: netcord.currentUser.id || ""
+                        onEditRequested: function(id, content) {
+                            appRoot.editMessageId = id
+                            editMessageText.text = content
+                            editMessageDialog.open()
                         }
+                        onDeleteRequested: function(id) { netcord.deleteMessage(id) }
+                        onAttachmentOpenRequested: function(id, filename) { netcord.downloadAttachment(id, filename) }
                     }
                 }
 
@@ -750,10 +642,11 @@ Rectangle {
                     }
                 }
 
-                VoiceControls {
+                VoicePanel {
                     Layout.fillWidth: true
                     connected: netcord.voiceConnected
                     status: netcord.voiceStatus
+                    participants: netcord.serverMembers
                     onLeaveRequested: netcord.leaveVoice()
                 }
 
@@ -781,20 +674,9 @@ Rectangle {
                     Layout.preferredHeight: 120
                     clip: true
                     model: netcord.serverMembers
-                    delegate: RowLayout {
+                    delegate: MemberItem {
                         width: ListView.view.width
-                        Rectangle {
-                            Layout.preferredWidth: 8
-                            Layout.preferredHeight: 8
-                            radius: 4
-                            color: modelData.status === "online" ? "#37d7a7" : "#6f7788"
-                        }
-                        Label {
-                            text: modelData.username || modelData.user_id
-                            color: "#d8e1ee"
-                            elide: Text.ElideRight
-                            Layout.fillWidth: true
-                        }
+                        member: modelData
                     }
                 }
 

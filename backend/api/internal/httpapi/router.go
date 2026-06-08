@@ -1,8 +1,12 @@
 package httpapi
 
 import (
+	"bufio"
 	"errors"
+	"log/slog"
+	"net"
 	"net/http"
+	"time"
 
 	"netcord/backend/api/internal/auth"
 	"netcord/backend/api/internal/gateway"
@@ -121,11 +125,50 @@ func NewRouterWithConfig(config RouterConfig) http.Handler {
 	mux.Handle("GET /ai/jobs", protected(config.Tokens, server.listAIJobs))
 	mux.Handle("GET /ai/jobs/{job_id}", protected(config.Tokens, server.getAIJob))
 
-	return mux
+	return requestLogger(mux)
 }
 
 func protected(tokens *auth.TokenManager, handler http.HandlerFunc) http.Handler {
 	return middleware.RequireAuth(tokens)(http.HandlerFunc(handler))
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+func (r *statusRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := r.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hijacker.Hijack()
+}
+
+func (r *statusRecorder) Flush() {
+	flusher, ok := r.ResponseWriter.(http.Flusher)
+	if ok {
+		flusher.Flush()
+	}
+}
+
+func requestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
+		slog.Info("http request",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"status", recorder.status,
+			"duration_ms", time.Since(started).Milliseconds(),
+		)
+	})
 }
 
 func (s *Server) writeServiceError(w http.ResponseWriter, err error) {

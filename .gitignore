@@ -18,3 +18,4 @@ bin/
 backend/api/netcord-api
 backend/api/coverage.out
 client/desktop-qt/build*/
+client/desktop-qt/package-windows/

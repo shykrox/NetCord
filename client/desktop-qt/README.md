@@ -10,8 +10,8 @@ Initial Qt 6/QML desktop client for NetCord.
 - Calls `/users/me`, `/servers`, `/servers/{id}/channels`, `/channels/{id}/messages`.
 - Sends messages with `POST /channels/{id}/messages`.
 - Uploads files with `POST /files/upload` and attaches uploaded file IDs to messages.
-- Displays message attachments returned by the backend.
-- Connects to `/gateway/ws` and receives `message.created` in real time.
+- Downloads protected attachments through Qt with `Authorization: Bearer <JWT>`, saves them in the local cache, then opens the local file.
+- Connects to `/gateway/ws` with an `Authorization` header and receives `message.created` in real time.
 - Handles `message.updated`, `message.deleted`, typing events, friend/DM events, and AI job progress events.
 - Automatic WebSocket reconnect with a visible connected/offline indicator.
 - Manual refresh buttons for servers, channels, and messages.
@@ -101,6 +101,8 @@ ws://127.0.0.1:8080/gateway/ws
 ```
 
 For HTTPS backends, the client automatically uses `wss://` for the gateway.
+
+The JWT is sent in the WebSocket `Authorization` header, not in the URL.
 
 ## Troubleshooting
 
