@@ -67,6 +67,63 @@ Rectangle {
         }
     }
 
+    Dialog {
+        id: profileDialog
+        title: "User settings"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onAccepted: netcord.updateProfile(profileName.text, profileStatus.currentText)
+
+        ColumnLayout {
+            spacing: 10
+            TextField {
+                id: profileName
+                text: netcord.currentUser.display_name || netcord.currentUser.username || ""
+                placeholderText: "Display name"
+                Layout.preferredWidth: 320
+            }
+            ComboBox {
+                id: profileStatus
+                model: ["online", "idle", "dnd", "offline"]
+            }
+            Button {
+                text: "Clear local cache"
+                onClicked: netcord.clearCache()
+            }
+        }
+    }
+
+    Dialog {
+        id: roleDialog
+        title: "Create role"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onAccepted: netcord.createRole(roleName.text, roleAdmin.checked ? 524288 : 0)
+
+        ColumnLayout {
+            spacing: 10
+            TextField { id: roleName; placeholderText: "Role name"; Layout.preferredWidth: 320 }
+            CheckBox { id: roleAdmin; text: "Administrator" }
+        }
+    }
+
+    Dialog {
+        id: joinInviteDialog
+        title: "Join invite"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onAccepted: netcord.joinInvite(inviteCode.text)
+
+        TextField {
+            id: inviteCode
+            placeholderText: "Invite code"
+            Layout.preferredWidth: 320
+        }
+    }
+
     DropArea {
         anchors.fill: parent
         onDropped: function(drop) {
@@ -155,6 +212,12 @@ Rectangle {
                     Layout.fillWidth: true
                     onClicked: netcord.logout()
                 }
+
+                Button {
+                    text: "Settings"
+                    Layout.fillWidth: true
+                    onClicked: profileDialog.open()
+                }
             }
         }
 
@@ -200,7 +263,7 @@ Rectangle {
                 }
 
                 Label {
-                    text: "Text channels"
+                    text: "Channels"
                     color: "#95a0b2"
                     font.pixelSize: 12
                     font.bold: true
@@ -214,35 +277,54 @@ Rectangle {
                     spacing: 4
                     model: netcord.channels
 
-                    delegate: Rectangle {
+                    delegate: Loader {
                         width: ListView.view.width
                         height: 38
-                        radius: 6
-                        color: modelData.id === netcord.selectedChannel.id ? "#2b3240" : "transparent"
+                        sourceComponent: modelData.type === "voice" ? voiceChannelDelegate : textChannelDelegate
+                        property var channelData: modelData
+                    }
 
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 8
+                    Component {
+                        id: textChannelDelegate
+                        Rectangle {
+                            width: parent.width
+                            height: 38
+                            radius: 6
+                            color: channelData.id === netcord.selectedChannel.id ? "#2b3240" : "transparent"
 
-                            Label {
-                                text: "#"
-                                color: "#6f7b8f"
-                                font.pixelSize: 18
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                spacing: 8
+
+                                Label {
+                                    text: "#"
+                                    color: "#6f7b8f"
+                                    font.pixelSize: 18
+                                }
+
+                                Label {
+                                    text: channelData.name
+                                    color: channelData.id === netcord.selectedChannel.id ? "#f3f6fb" : "#aab3c2"
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
                             }
 
-                            Label {
-                                text: modelData.name
-                                color: modelData.id === netcord.selectedChannel.id ? "#f3f6fb" : "#aab3c2"
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: netcord.selectChannel(channelData.id)
                             }
                         }
+                    }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: netcord.selectChannel(modelData.id)
+                    Component {
+                        id: voiceChannelDelegate
+                        VoiceChannelItem {
+                            width: parent.width
+                            channel: channelData
+                            onJoinRequested: function(channelId) { netcord.joinVoice(channelId) }
                         }
                     }
                 }
@@ -653,7 +735,7 @@ Rectangle {
                 RowLayout {
                     Layout.fillWidth: true
                     Label {
-                        text: "Social"
+                        text: "Info"
                         color: "#f3f6fb"
                         font.bold: true
                         Layout.fillWidth: true
@@ -665,6 +747,68 @@ Rectangle {
                             netcord.loadFriendRequests()
                             netcord.loadDMs()
                         }
+                    }
+                }
+
+                VoiceControls {
+                    Layout.fillWidth: true
+                    connected: netcord.voiceConnected
+                    status: netcord.voiceStatus
+                    onLeaveRequested: netcord.leaveVoice()
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Button {
+                        text: "Invite"
+                        enabled: !!netcord.selectedServer.id
+                        onClicked: netcord.createInvite()
+                    }
+                    Button {
+                        text: "Join"
+                        onClicked: joinInviteDialog.open()
+                    }
+                    Button {
+                        text: "Role"
+                        enabled: !!netcord.selectedServer.id
+                        onClicked: roleDialog.open()
+                    }
+                }
+
+                Label { text: "Members"; color: "#95a0b2"; font.bold: true }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 120
+                    clip: true
+                    model: netcord.serverMembers
+                    delegate: RowLayout {
+                        width: ListView.view.width
+                        Rectangle {
+                            Layout.preferredWidth: 8
+                            Layout.preferredHeight: 8
+                            radius: 4
+                            color: modelData.status === "online" ? "#37d7a7" : "#6f7788"
+                        }
+                        Label {
+                            text: modelData.username || modelData.user_id
+                            color: "#d8e1ee"
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                    }
+                }
+
+                Label { text: "Roles"; color: "#95a0b2"; font.bold: true }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 80
+                    clip: true
+                    model: netcord.roles
+                    delegate: Label {
+                        width: ListView.view.width
+                        text: modelData.name || "role"
+                        color: "#d8e1ee"
+                        elide: Text.ElideRight
                     }
                 }
 

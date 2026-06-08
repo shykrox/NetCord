@@ -50,6 +50,7 @@ The server validates the channel and membership before broadcasting typing event
 - `voice.state`
 - `job.progress`
 - `job.completed`
+- `ai.job.updated` (reserved alias for job status updates)
 - `error`
 
 Subscriptions are in memory:

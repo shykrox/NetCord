@@ -429,7 +429,7 @@ func (r *PostgresSocialRepository) hydrateDMMembers(ctx context.Context, convers
 	}
 
 	rows, err := r.pool.Query(ctx, `
-		SELECT dm.conversation_id, u.id, u.username, u.email, u.password_hash, u.display_name, u.avatar_url,
+		SELECT dm.conversation_id, u.id, u.username, u.email, u.password_hash, u.display_name, u.avatar_url, u.banner_url,
 			COALESCE(up.status, 'offline') AS status, u.is_bot, u.created_at, u.updated_at
 		FROM dm_members dm
 		JOIN users u ON u.id = dm.user_id
@@ -445,7 +445,7 @@ func (r *PostgresSocialRepository) hydrateDMMembers(ctx context.Context, convers
 	for rows.Next() {
 		var conversationID uuid.UUID
 		var user models.User
-		if err := rows.Scan(&conversationID, &user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.DisplayName, &user.AvatarURL, &user.Status, &user.IsBot, &user.CreatedAt, &user.UpdatedAt); err != nil {
+		if err := rows.Scan(&conversationID, &user.ID, &user.Username, &user.Email, &user.PasswordHash, &user.DisplayName, &user.AvatarURL, &user.BannerURL, &user.Status, &user.IsBot, &user.CreatedAt, &user.UpdatedAt); err != nil {
 			return err
 		}
 		index, ok := conversationIndex[conversationID]

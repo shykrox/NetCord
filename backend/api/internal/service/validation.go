@@ -63,6 +63,19 @@ func validatePassword(password string) string {
 	return ""
 }
 
+func validateUpdateMeInput(input UpdateMeInput) map[string]string {
+	fields := make(map[string]string)
+	if len(input.DisplayName) > 80 {
+		fields["display_name"] = "display name must be 80 characters or fewer"
+	}
+	switch input.Status {
+	case models.PresenceOnline, models.PresenceIdle, models.PresenceDND, models.PresenceOffline:
+	default:
+		fields["status"] = "status must be online, idle, dnd, or offline"
+	}
+	return fields
+}
+
 func validateCreateServerInput(input CreateServerInput) map[string]string {
 	fields := make(map[string]string)
 	if input.Name == "" {
@@ -76,6 +89,13 @@ func validateCreateServerInput(input CreateServerInput) map[string]string {
 	}
 
 	return fields
+}
+
+func validateUpdateServerInput(input UpdateServerInput) map[string]string {
+	return validateCreateServerInput(CreateServerInput{
+		Name:        input.Name,
+		Description: input.Description,
+	})
 }
 
 func validateCreateChannelInput(input CreateChannelInput) map[string]string {
@@ -99,6 +119,13 @@ func validateCreateChannelInput(input CreateChannelInput) map[string]string {
 		return fields
 	}
 	return fields
+}
+
+func validateUpdateChannelInput(input UpdateChannelInput) map[string]string {
+	return validateCreateChannelInput(CreateChannelInput{
+		Name: input.Name,
+		Type: input.Type,
+	})
 }
 
 func validateCreateMessageInput(input CreateMessageInput) map[string]string {
@@ -247,6 +274,22 @@ func validateCreateInviteInput(input CreateInviteInput) map[string]string {
 	}
 	if input.ExpiresAt != nil && input.ExpiresAt.IsZero() {
 		fields["expires_at"] = "expires_at must be a valid timestamp"
+	}
+	return fields
+}
+
+func validateCreateAIJobInput(command string, input CreateAIJobInput) map[string]string {
+	fields := make(map[string]string)
+	if command != models.AICommandAsk && command != models.AICommandDraw {
+		fields["command"] = "command must be ask or draw"
+	}
+	if input.ChannelID == uuid.Nil {
+		fields["channel_id"] = "channel_id is required"
+	}
+	if input.Prompt == "" {
+		fields["prompt"] = "prompt is required"
+	} else if len(input.Prompt) > 2000 {
+		fields["prompt"] = "prompt must be 2000 characters or fewer"
 	}
 	return fields
 }

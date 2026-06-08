@@ -13,6 +13,7 @@ type User struct {
 	PasswordHash string
 	DisplayName  *string
 	AvatarURL    *string
+	BannerURL    *string
 	Status       string
 	IsBot        bool
 	CreatedAt    time.Time
@@ -25,6 +26,7 @@ type PublicUser struct {
 	Email       string    `json:"email"`
 	DisplayName string    `json:"display_name"`
 	AvatarURL   *string   `json:"avatar_url"`
+	BannerURL   *string   `json:"banner_url"`
 	Status      string    `json:"status"`
 	IsBot       bool      `json:"is_bot"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -85,6 +87,7 @@ func (u User) Public() PublicUser {
 		Email:       u.Email,
 		DisplayName: displayName,
 		AvatarURL:   u.AvatarURL,
+		BannerURL:   u.BannerURL,
 		Status:      status,
 		IsBot:       u.IsBot,
 		CreatedAt:   u.CreatedAt,

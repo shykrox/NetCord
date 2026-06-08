@@ -7,6 +7,7 @@ var (
 	ErrNotFound           = errors.New("resource not found")
 	ErrForbidden          = errors.New("forbidden")
 	ErrUnavailable        = errors.New("service unavailable")
+	ErrVoiceNotConfigured = errors.New("voice not configured")
 )
 
 type ValidationError struct {

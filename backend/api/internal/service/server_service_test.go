@@ -46,6 +46,43 @@ func TestCreateChannelRequiresServerMembership(t *testing.T) {
 	}
 }
 
+func TestUpdateServerRequiresOwner(t *testing.T) {
+	repo := newFakeServerRepository()
+	service := NewServerService(repo)
+	ownerID := uuid.New()
+	otherID := uuid.New()
+	serverID := uuid.New()
+	repo.servers[serverID] = models.Server{ID: serverID, OwnerID: ownerID, Name: "Original"}
+	repo.members[serverID] = map[uuid.UUID]string{
+		ownerID: models.ServerRoleOwner,
+		otherID: models.ServerRoleMember,
+	}
+
+	_, err := service.UpdateServer(context.Background(), otherID, serverID, UpdateServerInput{Name: "Nope"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestUpdateChannelAllowsOwner(t *testing.T) {
+	repo := newFakeServerRepository()
+	service := NewServerService(repo)
+	ownerID := uuid.New()
+	serverID := uuid.New()
+	channelID := uuid.New()
+	repo.servers[serverID] = models.Server{ID: serverID, OwnerID: ownerID, Name: "NetCord"}
+	repo.members[serverID] = map[uuid.UUID]string{ownerID: models.ServerRoleOwner}
+	repo.channels[channelID] = models.Channel{ID: channelID, ServerID: serverID, Name: "general", Type: models.ChannelTypeText}
+
+	channel, err := service.UpdateChannel(context.Background(), ownerID, channelID, UpdateChannelInput{Name: "voice", Type: models.ChannelTypeVoice})
+	if err != nil {
+		t.Fatalf("update channel: %v", err)
+	}
+	if channel.Name != "voice" || channel.Type != models.ChannelTypeVoice {
+		t.Fatalf("unexpected channel: %+v", channel)
+	}
+}
+
 func TestCreateMessageStoresAuthorAndChannelServer(t *testing.T) {
 	repo := newFakeServerRepository()
 	service := NewServerService(repo)
@@ -216,6 +253,28 @@ func (r *fakeServerRepository) ListServersForUser(ctx context.Context, userID uu
 	return servers, nil
 }
 
+func (r *fakeServerRepository) UpdateServerForOwner(ctx context.Context, serverID, userID uuid.UUID, name string, description *string) (models.Server, error) {
+	server, ok := r.servers[serverID]
+	if !ok || server.OwnerID != userID {
+		return models.Server{}, repository.ErrForbidden
+	}
+	server.Name = name
+	server.Description = description
+	server.UpdatedAt = time.Now().UTC()
+	r.servers[serverID] = server
+	return server, nil
+}
+
+func (r *fakeServerRepository) DeleteServerForOwner(ctx context.Context, serverID, userID uuid.UUID) error {
+	server, ok := r.servers[serverID]
+	if !ok || server.OwnerID != userID {
+		return repository.ErrForbidden
+	}
+	delete(r.servers, serverID)
+	delete(r.members, serverID)
+	return nil
+}
+
 func (r *fakeServerRepository) GetServerForUser(ctx context.Context, serverID, userID uuid.UUID) (models.Server, error) {
 	if _, ok := r.members[serverID][userID]; !ok {
 		return models.Server{}, repository.ErrServerNotFound
@@ -225,6 +284,22 @@ func (r *fakeServerRepository) GetServerForUser(ctx context.Context, serverID, u
 		return models.Server{}, repository.ErrServerNotFound
 	}
 	return server, nil
+}
+
+func (r *fakeServerRepository) ListServerMembersForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.ServerMember, error) {
+	if _, ok := r.members[serverID][userID]; !ok {
+		return nil, repository.ErrServerNotFound
+	}
+	members := make([]models.ServerMember, 0)
+	for memberID, role := range r.members[serverID] {
+		members = append(members, models.ServerMember{
+			ServerID: serverID,
+			UserID:   memberID,
+			Role:     role,
+			Status:   models.PresenceOffline,
+		})
+	}
+	return members, nil
 }
 
 func (r *fakeServerRepository) CreateChannel(ctx context.Context, channel models.Channel) (models.Channel, error) {
@@ -238,6 +313,35 @@ func (r *fakeServerRepository) CreateChannel(ctx context.Context, channel models
 	channel.UpdatedAt = now
 	r.channels[channel.ID] = channel
 	return channel, nil
+}
+
+func (r *fakeServerRepository) UpdateChannelForOwner(ctx context.Context, channelID, userID uuid.UUID, name, channelType string) (models.Channel, error) {
+	channel, ok := r.channels[channelID]
+	if !ok {
+		return models.Channel{}, repository.ErrChannelNotFound
+	}
+	server, ok := r.servers[channel.ServerID]
+	if !ok || server.OwnerID != userID {
+		return models.Channel{}, repository.ErrForbidden
+	}
+	channel.Name = name
+	channel.Type = channelType
+	channel.UpdatedAt = time.Now().UTC()
+	r.channels[channelID] = channel
+	return channel, nil
+}
+
+func (r *fakeServerRepository) DeleteChannelForOwner(ctx context.Context, channelID, userID uuid.UUID) error {
+	channel, ok := r.channels[channelID]
+	if !ok {
+		return repository.ErrChannelNotFound
+	}
+	server, ok := r.servers[channel.ServerID]
+	if !ok || server.OwnerID != userID {
+		return repository.ErrForbidden
+	}
+	delete(r.channels, channelID)
+	return nil
 }
 
 func (r *fakeServerRepository) ListChannelsForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.Channel, error) {

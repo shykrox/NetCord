@@ -67,6 +67,10 @@ func NewRouterWithConfig(config RouterConfig) http.Handler {
 	mux.HandleFunc("POST /auth/register", server.register)
 	mux.HandleFunc("POST /auth/login", server.login)
 	mux.Handle("GET /users/me", protected(config.Tokens, server.me))
+	mux.Handle("PATCH /users/me", protected(config.Tokens, server.updateMe))
+	mux.Handle("POST /users/me/avatar", protected(config.Tokens, server.uploadAvatar))
+	mux.Handle("POST /users/me/banner", protected(config.Tokens, server.uploadBanner))
+	mux.Handle("GET /users/{user_id}", protected(config.Tokens, server.getUser))
 	mux.Handle("PATCH /users/me/presence", protected(config.Tokens, server.updatePresence))
 	mux.HandleFunc("GET /gateway/ws", server.gatewayWS)
 	mux.Handle("POST /files/upload", protected(config.Tokens, server.uploadFile))
@@ -75,8 +79,13 @@ func NewRouterWithConfig(config RouterConfig) http.Handler {
 	mux.Handle("POST /servers", protected(config.Tokens, server.createServer))
 	mux.Handle("GET /servers", protected(config.Tokens, server.listServers))
 	mux.Handle("GET /servers/{server_id}", protected(config.Tokens, server.getServer))
+	mux.Handle("PATCH /servers/{server_id}", protected(config.Tokens, server.updateServer))
+	mux.Handle("DELETE /servers/{server_id}", protected(config.Tokens, server.deleteServer))
+	mux.Handle("GET /servers/{server_id}/members", protected(config.Tokens, server.listServerMembers))
 	mux.Handle("POST /servers/{server_id}/channels", protected(config.Tokens, server.createChannel))
 	mux.Handle("GET /servers/{server_id}/channels", protected(config.Tokens, server.listChannels))
+	mux.Handle("PATCH /channels/{channel_id}", protected(config.Tokens, server.updateChannel))
+	mux.Handle("DELETE /channels/{channel_id}", protected(config.Tokens, server.deleteChannel))
 	mux.Handle("GET /channels/{channel_id}/messages", protected(config.Tokens, server.listMessages))
 	mux.Handle("GET /channels/{channel_id}/messages/search", protected(config.Tokens, server.searchMessages))
 	mux.Handle("POST /channels/{channel_id}/messages", protected(config.Tokens, server.createMessage))
@@ -107,6 +116,11 @@ func NewRouterWithConfig(config RouterConfig) http.Handler {
 	mux.Handle("POST /voice/join", protected(config.Tokens, server.joinVoice))
 	mux.Handle("POST /voice/leave", protected(config.Tokens, server.leaveVoice))
 
+	mux.Handle("POST /ai/ask", protected(config.Tokens, server.createAskJob))
+	mux.Handle("POST /ai/draw", protected(config.Tokens, server.createDrawJob))
+	mux.Handle("GET /ai/jobs", protected(config.Tokens, server.listAIJobs))
+	mux.Handle("GET /ai/jobs/{job_id}", protected(config.Tokens, server.getAIJob))
+
 	return mux
 }
 
@@ -125,6 +139,8 @@ func (s *Server) writeServiceError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "not_found", "resource not found", nil)
 	case errors.Is(err, service.ErrForbidden):
 		writeError(w, http.StatusForbidden, "forbidden", "forbidden", nil)
+	case errors.Is(err, service.ErrVoiceNotConfigured):
+		writeError(w, http.StatusServiceUnavailable, "voice_not_configured", "LiveKit voice is not configured", nil)
 	case errors.Is(err, service.ErrUnavailable):
 		writeError(w, http.StatusServiceUnavailable, "service_unavailable", "service unavailable", nil)
 	case errors.Is(err, repository.ErrUserNotFound):

@@ -32,6 +32,39 @@ type PublicServer struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
+type ServerMember struct {
+	ServerID uuid.UUID
+	UserID   uuid.UUID
+	Username string
+	Role     string
+	JoinedAt time.Time
+	Status   string
+}
+
+type PublicServerMember struct {
+	ServerID uuid.UUID `json:"server_id"`
+	UserID   uuid.UUID `json:"user_id"`
+	Username string    `json:"username"`
+	Role     string    `json:"role"`
+	JoinedAt time.Time `json:"joined_at"`
+	Status   string    `json:"status"`
+}
+
+func (m ServerMember) Public() PublicServerMember {
+	status := m.Status
+	if status == "" {
+		status = PresenceOffline
+	}
+	return PublicServerMember{
+		ServerID: m.ServerID,
+		UserID:   m.UserID,
+		Username: m.Username,
+		Role:     m.Role,
+		JoinedAt: m.JoinedAt,
+		Status:   status,
+	}
+}
+
 func (s Server) Public() PublicServer {
 	return PublicServer{
 		ID:          s.ID,

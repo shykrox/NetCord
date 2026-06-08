@@ -24,6 +24,10 @@ Errors use:
 - `POST /auth/register` with `username`, `email`, `password`
 - `POST /auth/login` with `email`, `password`
 - `GET /users/me`
+- `PATCH /users/me` with `display_name`, `status`
+- `POST /users/me/avatar` as multipart `file`
+- `POST /users/me/banner` as multipart `file`
+- `GET /users/{id}`
 - `PATCH /users/me/presence` with `status` (`online`, `idle`, `dnd`, `offline`) and optional `custom_status`
 
 ## Servers and Channels
@@ -31,8 +35,13 @@ Errors use:
 - `POST /servers` with `name`, optional `description`
 - `GET /servers`
 - `GET /servers/{server_id}`
+- `PATCH /servers/{server_id}`
+- `DELETE /servers/{server_id}`
+- `GET /servers/{server_id}/members`
 - `POST /servers/{server_id}/channels` with `name`, optional `type` (`text` or `voice`)
 - `GET /servers/{server_id}/channels`
+- `PATCH /channels/{channel_id}`
+- `DELETE /channels/{channel_id}`
 
 The server creator is inserted as owner. Users can only read servers/channels where they are members.
 
@@ -92,3 +101,10 @@ Voice join requires a `voice` channel, membership, `CONNECT_VOICE`, and LiveKit 
 ## AI Commands
 
 Posting `/ask <prompt>` or `/draw <prompt>` in a text channel creates an `ai_jobs` queue row and broadcasts `job.progress`. Execution workers and ComfyUI output attachment are foundation work for the next implementation step.
+
+Explicit AI endpoints:
+
+- `POST /ai/ask` with `channel_id`, `prompt`
+- `POST /ai/draw` with `channel_id`, `prompt`
+- `GET /ai/jobs?limit=50`
+- `GET /ai/jobs/{id}`

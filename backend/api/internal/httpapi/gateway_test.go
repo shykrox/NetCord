@@ -166,6 +166,28 @@ func (r *httpFakeServerRepository) ListServersForUser(ctx context.Context, userI
 	return servers, nil
 }
 
+func (r *httpFakeServerRepository) UpdateServerForOwner(ctx context.Context, serverID, userID uuid.UUID, name string, description *string) (models.Server, error) {
+	server, ok := r.servers[serverID]
+	if !ok || server.OwnerID != userID {
+		return models.Server{}, repository.ErrForbidden
+	}
+	server.Name = name
+	server.Description = description
+	server.UpdatedAt = time.Now().UTC()
+	r.servers[serverID] = server
+	return server, nil
+}
+
+func (r *httpFakeServerRepository) DeleteServerForOwner(ctx context.Context, serverID, userID uuid.UUID) error {
+	server, ok := r.servers[serverID]
+	if !ok || server.OwnerID != userID {
+		return repository.ErrForbidden
+	}
+	delete(r.servers, serverID)
+	delete(r.members, serverID)
+	return nil
+}
+
 func (r *httpFakeServerRepository) GetServerForUser(ctx context.Context, serverID, userID uuid.UUID) (models.Server, error) {
 	if _, ok := r.members[serverID][userID]; !ok {
 		return models.Server{}, repository.ErrServerNotFound
@@ -177,11 +199,51 @@ func (r *httpFakeServerRepository) GetServerForUser(ctx context.Context, serverI
 	return server, nil
 }
 
+func (r *httpFakeServerRepository) ListServerMembersForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.ServerMember, error) {
+	if _, ok := r.members[serverID][userID]; !ok {
+		return nil, repository.ErrServerNotFound
+	}
+	members := make([]models.ServerMember, 0)
+	for memberID, role := range r.members[serverID] {
+		members = append(members, models.ServerMember{ServerID: serverID, UserID: memberID, Role: role, Status: models.PresenceOffline})
+	}
+	return members, nil
+}
+
 func (r *httpFakeServerRepository) CreateChannel(ctx context.Context, channel models.Channel) (models.Channel, error) {
 	channel.CreatedAt = time.Now().UTC()
 	channel.UpdatedAt = channel.CreatedAt
 	r.channels[channel.ID] = channel
 	return channel, nil
+}
+
+func (r *httpFakeServerRepository) UpdateChannelForOwner(ctx context.Context, channelID, userID uuid.UUID, name, channelType string) (models.Channel, error) {
+	channel, ok := r.channels[channelID]
+	if !ok {
+		return models.Channel{}, repository.ErrChannelNotFound
+	}
+	server, ok := r.servers[channel.ServerID]
+	if !ok || server.OwnerID != userID {
+		return models.Channel{}, repository.ErrForbidden
+	}
+	channel.Name = name
+	channel.Type = channelType
+	channel.UpdatedAt = time.Now().UTC()
+	r.channels[channelID] = channel
+	return channel, nil
+}
+
+func (r *httpFakeServerRepository) DeleteChannelForOwner(ctx context.Context, channelID, userID uuid.UUID) error {
+	channel, ok := r.channels[channelID]
+	if !ok {
+		return repository.ErrChannelNotFound
+	}
+	server, ok := r.servers[channel.ServerID]
+	if !ok || server.OwnerID != userID {
+		return repository.ErrForbidden
+	}
+	delete(r.channels, channelID)
+	return nil
 }
 
 func (r *httpFakeServerRepository) ListChannelsForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.Channel, error) {

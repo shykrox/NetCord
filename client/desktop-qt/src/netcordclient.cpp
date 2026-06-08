@@ -158,6 +158,16 @@ QVariantList NetCordClient::aiJobs() const
     return m_aiJobs;
 }
 
+QVariantList NetCordClient::serverMembers() const
+{
+    return m_serverMembers;
+}
+
+QVariantList NetCordClient::roles() const
+{
+    return m_roles;
+}
+
 QVariantList NetCordClient::pendingAttachments() const
 {
     return m_pendingAttachments;
@@ -176,6 +186,16 @@ QVariantMap NetCordClient::selectedChannel() const
 QString NetCordClient::typingText() const
 {
     return m_typingText;
+}
+
+bool NetCordClient::voiceConnected() const
+{
+    return m_voiceConnected;
+}
+
+QString NetCordClient::voiceStatus() const
+{
+    return m_voiceStatus;
 }
 
 void NetCordClient::initialize()
@@ -294,10 +314,12 @@ void NetCordClient::selectServer(const QString &serverId)
     }
 
     const QString previousChannelId = m_selectedChannel.value(QStringLiteral("id")).toString();
-    setSelectedServer(server);
-    setChannels(cachedChannels(serverId));
-    setSelectedChannel({});
-    setMessages({});
+        setSelectedServer(server);
+        setChannels(cachedChannels(serverId));
+        setSelectedChannel({});
+        setMessages({});
+        loadServerMembers();
+        loadRoles();
 
     getJson(QStringLiteral("/servers/%1/channels").arg(serverId), true, [this, previousChannelId](const QJsonObject &payload) {
         const QVariantList channels = jsonArrayToVariantList(payload.value(QStringLiteral("channels")).toArray());
@@ -474,6 +496,124 @@ void NetCordClient::createChannel(const QString &name, const QString &type)
              },
              true,
              [this](const QJsonObject &) { refreshChannels(); });
+}
+
+void NetCordClient::updateProfile(const QString &displayName, const QString &status)
+{
+    patchJson(QStringLiteral("/users/me"),
+              QJsonObject{
+                  {QStringLiteral("display_name"), displayName.trimmed()},
+                  {QStringLiteral("status"), status.trimmed().isEmpty() ? QStringLiteral("offline") : status.trimmed()},
+              },
+              true,
+              [this](const QJsonObject &payload) {
+                  setCurrentUser(payload.toVariantMap());
+                  setStatusMessage(QStringLiteral("Profile updated"));
+              });
+}
+
+void NetCordClient::loadServerMembers()
+{
+    const QString serverId = m_selectedServer.value(QStringLiteral("id")).toString();
+    if (serverId.isEmpty()) {
+        setServerMembers({});
+        return;
+    }
+    getJson(QStringLiteral("/servers/%1/members").arg(serverId), true, [this](const QJsonObject &payload) {
+        setServerMembers(jsonArrayToVariantList(payload.value(QStringLiteral("members")).toArray()));
+    });
+}
+
+void NetCordClient::loadRoles()
+{
+    const QString serverId = m_selectedServer.value(QStringLiteral("id")).toString();
+    if (serverId.isEmpty()) {
+        setRoles({});
+        return;
+    }
+    getJson(QStringLiteral("/servers/%1/roles").arg(serverId), true, [this](const QJsonObject &payload) {
+        setRoles(jsonArrayToVariantList(payload.value(QStringLiteral("roles")).toArray()));
+    });
+}
+
+void NetCordClient::createRole(const QString &name, qint64 permissions)
+{
+    const QString serverId = m_selectedServer.value(QStringLiteral("id")).toString();
+    if (serverId.isEmpty()) {
+        return;
+    }
+    postJson(QStringLiteral("/servers/%1/roles").arg(serverId),
+             QJsonObject{
+                 {QStringLiteral("name"), name.trimmed()},
+                 {QStringLiteral("permissions"), permissions},
+             },
+             true,
+             [this](const QJsonObject &) { loadRoles(); });
+}
+
+void NetCordClient::createInvite()
+{
+    const QString serverId = m_selectedServer.value(QStringLiteral("id")).toString();
+    if (serverId.isEmpty()) {
+        return;
+    }
+    postJson(QStringLiteral("/servers/%1/invites").arg(serverId), {}, true, [this](const QJsonObject &payload) {
+        setStatusMessage(QStringLiteral("Invite code: %1").arg(payload.value(QStringLiteral("code")).toString()));
+    });
+}
+
+void NetCordClient::joinInvite(const QString &code)
+{
+    const QString trimmed = code.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+    postJson(QStringLiteral("/invites/%1/join").arg(trimmed), {}, true, [this](const QJsonObject &) { loadServers(); });
+}
+
+void NetCordClient::joinVoice(const QString &channelId)
+{
+    if (channelId.isEmpty()) {
+        return;
+    }
+    postJson(QStringLiteral("/voice/join"),
+             QJsonObject{{QStringLiteral("channel_id"), channelId}},
+             true,
+             [this, channelId](const QJsonObject &payload) {
+                 m_voiceChannelId = channelId;
+                 setVoiceConnected(true);
+                 setVoiceStatus(QStringLiteral("Voice room: %1").arg(payload.value(QStringLiteral("room")).toString()));
+             });
+}
+
+void NetCordClient::leaveVoice()
+{
+    if (m_voiceChannelId.isEmpty()) {
+        setVoiceConnected(false);
+        setVoiceStatus({});
+        return;
+    }
+    const QString channelId = m_voiceChannelId;
+    postJson(QStringLiteral("/voice/leave"),
+             QJsonObject{{QStringLiteral("channel_id"), channelId}},
+             true,
+             [this](const QJsonObject &) {
+                 m_voiceChannelId.clear();
+                 setVoiceConnected(false);
+                 setVoiceStatus(QStringLiteral("Voice disconnected"));
+             });
+}
+
+void NetCordClient::clearCache()
+{
+    if (!m_cache.isOpen()) {
+        return;
+    }
+    QSqlQuery query(m_cache);
+    query.exec(QStringLiteral("DELETE FROM messages"));
+    query.exec(QStringLiteral("DELETE FROM channels"));
+    query.exec(QStringLiteral("DELETE FROM servers"));
+    setStatusMessage(QStringLiteral("Local cache cleared"));
 }
 
 void NetCordClient::sendTypingStart()
@@ -868,7 +1008,22 @@ void NetCordClient::handleGatewayTextMessage(const QString &message)
         return;
     }
 
-    if (type == QStringLiteral("job.progress") || type == QStringLiteral("job.completed")) {
+    if (type == QStringLiteral("voice.joined")) {
+        const QJsonObject data = envelope.value(QStringLiteral("data")).toObject();
+        setVoiceStatus(QStringLiteral("Voice active: %1").arg(data.value(QStringLiteral("room")).toString()));
+        return;
+    }
+
+    if (type == QStringLiteral("voice.left")) {
+        const QJsonObject data = envelope.value(QStringLiteral("data")).toObject();
+        if (data.value(QStringLiteral("user_id")).toString() == m_currentUser.value(QStringLiteral("id")).toString()) {
+            setVoiceConnected(false);
+        }
+        setVoiceStatus(QStringLiteral("Voice user left"));
+        return;
+    }
+
+    if (type == QStringLiteral("job.progress") || type == QStringLiteral("job.completed") || type == QStringLiteral("ai.job.updated")) {
         addOrUpdateAIJob(envelope.value(QStringLiteral("data")).toObject().toVariantMap());
         return;
     }
@@ -1123,6 +1278,18 @@ void NetCordClient::setAIJobs(const QVariantList &jobs)
     emit aiJobsChanged();
 }
 
+void NetCordClient::setServerMembers(const QVariantList &members)
+{
+    m_serverMembers = members;
+    emit serverMembersChanged();
+}
+
+void NetCordClient::setRoles(const QVariantList &roles)
+{
+    m_roles = roles;
+    emit rolesChanged();
+}
+
 void NetCordClient::setPendingAttachments(const QVariantList &attachments)
 {
     m_pendingAttachments = attachments;
@@ -1148,6 +1315,24 @@ void NetCordClient::setTypingText(const QString &typingText)
     }
     m_typingText = typingText;
     emit typingTextChanged();
+}
+
+void NetCordClient::setVoiceConnected(bool connected)
+{
+    if (m_voiceConnected == connected) {
+        return;
+    }
+    m_voiceConnected = connected;
+    emit voiceConnectedChanged();
+}
+
+void NetCordClient::setVoiceStatus(const QString &status)
+{
+    if (m_voiceStatus == status) {
+        return;
+    }
+    m_voiceStatus = status;
+    emit voiceStatusChanged();
 }
 
 void NetCordClient::addOrUpdateMessage(const QVariantMap &message)
@@ -1219,10 +1404,15 @@ void NetCordClient::clearSession(bool clearStoredToken)
     setFriends({});
     setDMConversations({});
     setAIJobs({});
+    setServerMembers({});
+    setRoles({});
     setPendingAttachments({});
     setSelectedServer({});
     setSelectedChannel({});
     setTypingText({});
+    setVoiceConnected(false);
+    setVoiceStatus({});
+    m_voiceChannelId.clear();
 }
 
 QString NetCordClient::errorMessageFromPayload(const QJsonObject &payload, int statusCode, const QString &networkError) const

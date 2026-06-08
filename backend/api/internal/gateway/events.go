@@ -26,6 +26,7 @@ const (
 	EventVoiceState       = "voice.state"
 	EventJobProgress      = "job.progress"
 	EventJobCompleted     = "job.completed"
+	EventAIJobUpdated     = "ai.job.updated"
 	EventError            = "error"
 	HeartbeatInterval     = 30 * time.Second
 	clientSendBufferSize  = 64
@@ -187,4 +188,8 @@ func JobProgressEvent(job models.PublicAIJob) Event {
 
 func JobCompletedEvent(job models.PublicAIJob) Event {
 	return Event{Type: EventJobCompleted, Data: job}
+}
+
+func AIJobUpdatedEvent(job models.PublicAIJob) Event {
+	return Event{Type: EventAIJobUpdated, Data: job}
 }

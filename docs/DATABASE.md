@@ -4,7 +4,7 @@ Migrations live in `backend/api/migrations`.
 
 ## Current Tables
 
-- `users`: accounts, bcrypt password hash, profile fields, `is_bot`.
+- `users`: accounts, bcrypt password hash, profile fields, `banner_url`, `is_bot`.
 - `user_presence`: status, custom status, last seen.
 - `servers`: server metadata and owner.
 - `server_members`: membership and legacy owner/member role marker.

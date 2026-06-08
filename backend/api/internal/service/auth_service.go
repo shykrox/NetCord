@@ -24,6 +24,11 @@ type LoginInput struct {
 	Password string `json:"password"`
 }
 
+type UpdateMeInput struct {
+	DisplayName string `json:"display_name"`
+	Status      string `json:"status"`
+}
+
 type AuthResult struct {
 	Token string            `json:"token"`
 	User  models.PublicUser `json:"user"`
@@ -109,6 +114,53 @@ func (s *AuthService) Login(ctx context.Context, input LoginInput) (AuthResult, 
 
 func (s *AuthService) GetMe(ctx context.Context, userID uuid.UUID) (models.PublicUser, error) {
 	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return models.PublicUser{}, err
+	}
+	return user.Public(), nil
+}
+
+func (s *AuthService) GetUser(ctx context.Context, userID uuid.UUID) (models.PublicUser, error) {
+	user, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		return models.PublicUser{}, err
+	}
+	public := user.Public()
+	public.Email = ""
+	return public, nil
+}
+
+func (s *AuthService) UpdateMe(ctx context.Context, userID uuid.UUID, input UpdateMeInput) (models.PublicUser, error) {
+	input.DisplayName = strings.TrimSpace(input.DisplayName)
+	input.Status = strings.TrimSpace(input.Status)
+	if input.Status == "" {
+		input.Status = models.PresenceOffline
+	}
+	if fields := validateUpdateMeInput(input); len(fields) > 0 {
+		return models.PublicUser{}, &ValidationError{Fields: fields}
+	}
+
+	var displayName *string
+	if input.DisplayName != "" {
+		displayName = &input.DisplayName
+	}
+	user, err := s.users.UpdateProfile(ctx, userID, displayName, input.Status)
+	if err != nil {
+		return models.PublicUser{}, err
+	}
+	return user.Public(), nil
+}
+
+func (s *AuthService) SetAvatarURL(ctx context.Context, userID uuid.UUID, avatarURL string) (models.PublicUser, error) {
+	user, err := s.users.SetAvatarURL(ctx, userID, avatarURL)
+	if err != nil {
+		return models.PublicUser{}, err
+	}
+	return user.Public(), nil
+}
+
+func (s *AuthService) SetBannerURL(ctx context.Context, userID uuid.UUID, bannerURL string) (models.PublicUser, error) {
+	user, err := s.users.SetBannerURL(ctx, userID, bannerURL)
 	if err != nil {
 		return models.PublicUser{}, err
 	}

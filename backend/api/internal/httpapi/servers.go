@@ -67,6 +67,63 @@ func (s *Server) getServer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, server)
 }
 
+func (s *Server) updateServer(w http.ResponseWriter, r *http.Request) {
+	userID, ok := currentUserID(w, r)
+	if !ok {
+		return
+	}
+	serverID, ok := pathUUID(w, r, "server_id")
+	if !ok {
+		return
+	}
+
+	var input service.UpdateServerInput
+	if err := readJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+
+	server, err := s.serverService.UpdateServer(r.Context(), userID, serverID, input)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, server)
+}
+
+func (s *Server) deleteServer(w http.ResponseWriter, r *http.Request) {
+	userID, ok := currentUserID(w, r)
+	if !ok {
+		return
+	}
+	serverID, ok := pathUUID(w, r, "server_id")
+	if !ok {
+		return
+	}
+	if err := s.serverService.DeleteServer(r.Context(), userID, serverID); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) listServerMembers(w http.ResponseWriter, r *http.Request) {
+	userID, ok := currentUserID(w, r)
+	if !ok {
+		return
+	}
+	serverID, ok := pathUUID(w, r, "server_id")
+	if !ok {
+		return
+	}
+	members, err := s.serverService.ListServerMembers(r.Context(), userID, serverID)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, members)
+}
+
 func (s *Server) createChannel(w http.ResponseWriter, r *http.Request) {
 	userID, ok := currentUserID(w, r)
 	if !ok {
@@ -111,6 +168,46 @@ func (s *Server) listChannels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, channels)
+}
+
+func (s *Server) updateChannel(w http.ResponseWriter, r *http.Request) {
+	userID, ok := currentUserID(w, r)
+	if !ok {
+		return
+	}
+	channelID, ok := pathUUID(w, r, "channel_id")
+	if !ok {
+		return
+	}
+
+	var input service.UpdateChannelInput
+	if err := readJSON(r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json", err.Error(), nil)
+		return
+	}
+
+	channel, err := s.serverService.UpdateChannel(r.Context(), userID, channelID, input)
+	if err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, channel)
+}
+
+func (s *Server) deleteChannel(w http.ResponseWriter, r *http.Request) {
+	userID, ok := currentUserID(w, r)
+	if !ok {
+		return
+	}
+	channelID, ok := pathUUID(w, r, "channel_id")
+	if !ok {
+		return
+	}
+	if err := s.serverService.DeleteChannel(r.Context(), userID, channelID); err != nil {
+		s.writeServiceError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {

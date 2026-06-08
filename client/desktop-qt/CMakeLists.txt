@@ -21,6 +21,10 @@ qt_add_qml_module(NetCordDesktop
         qml/Main.qml
         qml/LoginView.qml
         qml/AppView.qml
+        qml/VoiceChannelItem.qml
+        qml/VoiceControls.qml
+        qml/VoiceParticipantList.qml
+        qml/VoiceDeviceSettings.qml
 )
 
 target_link_libraries(NetCordDesktop

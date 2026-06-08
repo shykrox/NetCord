@@ -33,10 +33,14 @@ class NetCordClient : public QObject
     Q_PROPERTY(QVariantList friends READ friends NOTIFY friendsChanged)
     Q_PROPERTY(QVariantList dmConversations READ dmConversations NOTIFY dmConversationsChanged)
     Q_PROPERTY(QVariantList aiJobs READ aiJobs NOTIFY aiJobsChanged)
+    Q_PROPERTY(QVariantList serverMembers READ serverMembers NOTIFY serverMembersChanged)
+    Q_PROPERTY(QVariantList roles READ roles NOTIFY rolesChanged)
     Q_PROPERTY(QVariantList pendingAttachments READ pendingAttachments NOTIFY pendingAttachmentsChanged)
     Q_PROPERTY(QVariantMap selectedServer READ selectedServer NOTIFY selectedServerChanged)
     Q_PROPERTY(QVariantMap selectedChannel READ selectedChannel NOTIFY selectedChannelChanged)
     Q_PROPERTY(QString typingText READ typingText NOTIFY typingTextChanged)
+    Q_PROPERTY(bool voiceConnected READ voiceConnected NOTIFY voiceConnectedChanged)
+    Q_PROPERTY(QString voiceStatus READ voiceStatus NOTIFY voiceStatusChanged)
 
 public:
     explicit NetCordClient(QObject *parent = nullptr);
@@ -57,10 +61,14 @@ public:
     QVariantList friends() const;
     QVariantList dmConversations() const;
     QVariantList aiJobs() const;
+    QVariantList serverMembers() const;
+    QVariantList roles() const;
     QVariantList pendingAttachments() const;
     QVariantMap selectedServer() const;
     QVariantMap selectedChannel() const;
     QString typingText() const;
+    bool voiceConnected() const;
+    QString voiceStatus() const;
 
     Q_INVOKABLE void initialize();
     Q_INVOKABLE void login(const QString &email, const QString &password);
@@ -81,6 +89,15 @@ public:
     Q_INVOKABLE void clearSearchResults();
     Q_INVOKABLE void createServer(const QString &name, const QString &description);
     Q_INVOKABLE void createChannel(const QString &name, const QString &type);
+    Q_INVOKABLE void updateProfile(const QString &displayName, const QString &status);
+    Q_INVOKABLE void loadServerMembers();
+    Q_INVOKABLE void loadRoles();
+    Q_INVOKABLE void createRole(const QString &name, qint64 permissions);
+    Q_INVOKABLE void createInvite();
+    Q_INVOKABLE void joinInvite(const QString &code);
+    Q_INVOKABLE void joinVoice(const QString &channelId);
+    Q_INVOKABLE void leaveVoice();
+    Q_INVOKABLE void clearCache();
     Q_INVOKABLE void sendTypingStart();
     Q_INVOKABLE void sendTypingStop();
     Q_INVOKABLE void openAttachment(const QString &downloadUrl);
@@ -110,10 +127,14 @@ signals:
     void friendsChanged();
     void dmConversationsChanged();
     void aiJobsChanged();
+    void serverMembersChanged();
+    void rolesChanged();
     void pendingAttachmentsChanged();
     void selectedServerChanged();
     void selectedChannelChanged();
     void typingTextChanged();
+    void voiceConnectedChanged();
+    void voiceStatusChanged();
 
 private:
     using JsonCallback = std::function<void(const QJsonObject &)>;
@@ -156,10 +177,14 @@ private:
     void setFriends(const QVariantList &friends);
     void setDMConversations(const QVariantList &conversations);
     void setAIJobs(const QVariantList &jobs);
+    void setServerMembers(const QVariantList &members);
+    void setRoles(const QVariantList &roles);
     void setPendingAttachments(const QVariantList &attachments);
     void setSelectedServer(const QVariantMap &server);
     void setSelectedChannel(const QVariantMap &channel);
     void setTypingText(const QString &typingText);
+    void setVoiceConnected(bool connected);
+    void setVoiceStatus(const QString &status);
     void addOrUpdateMessage(const QVariantMap &message);
     void removeMessage(const QString &messageId);
     void addOrUpdateAIJob(const QVariantMap &job);
@@ -196,9 +221,14 @@ private:
     QVariantList m_friends;
     QVariantList m_dmConversations;
     QVariantList m_aiJobs;
+    QVariantList m_serverMembers;
+    QVariantList m_roles;
     QVariantList m_pendingAttachments;
     QVariantMap m_selectedServer;
     QVariantMap m_selectedChannel;
     QString m_typingText;
     QString m_lastTypingChannelId;
+    QString m_voiceChannelId;
+    bool m_voiceConnected = false;
+    QString m_voiceStatus;
 };

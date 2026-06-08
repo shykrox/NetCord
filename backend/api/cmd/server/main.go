@@ -57,7 +57,7 @@ func main() {
 	socialService := service.NewSocialService(socialRepo, userRepo)
 	permissionService := service.NewPermissionService(permissionRepo)
 	voiceService := service.NewVoiceService(serverRepo, permissionService, cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-	aiService := service.NewAIService(aiRepo, cfg.ComfyUIURL)
+	aiService := service.NewAIService(aiRepo, serverRepo, cfg.ComfyUIURL)
 	gatewayHub := gateway.NewHub()
 	router := httpapi.NewRouterWithConfig(httpapi.RouterConfig{
 		AuthService:       authService,

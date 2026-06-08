@@ -16,6 +16,9 @@ type UserRepository interface {
 	Create(ctx context.Context, user models.User) (models.User, error)
 	GetByEmail(ctx context.Context, email string) (models.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (models.User, error)
+	UpdateProfile(ctx context.Context, userID uuid.UUID, displayName *string, status string) (models.User, error)
+	SetAvatarURL(ctx context.Context, userID uuid.UUID, avatarURL string) (models.User, error)
+	SetBannerURL(ctx context.Context, userID uuid.UUID, bannerURL string) (models.User, error)
 }
 
 type PostgresUserRepository struct {
@@ -28,10 +31,10 @@ func NewPostgresUserRepository(pool *pgxpool.Pool) *PostgresUserRepository {
 
 func (r *PostgresUserRepository) Create(ctx context.Context, user models.User) (models.User, error) {
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, status, is_bot)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		RETURNING id, username, email, password_hash, display_name, avatar_url, status, is_bot, created_at, updated_at
-	`, user.ID, user.Username, user.Email, user.PasswordHash, user.DisplayName, user.AvatarURL, user.Status, user.IsBot)
+		INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, banner_url, status, is_bot)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, username, email, password_hash, display_name, avatar_url, banner_url, status, is_bot, created_at, updated_at
+	`, user.ID, user.Username, user.Email, user.PasswordHash, user.DisplayName, user.AvatarURL, user.BannerURL, user.Status, user.IsBot)
 
 	created, err := scanUser(row)
 	if err != nil {
@@ -46,7 +49,7 @@ func (r *PostgresUserRepository) Create(ctx context.Context, user models.User) (
 
 func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (models.User, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, username, email, password_hash, display_name, avatar_url, status, is_bot, created_at, updated_at
+		SELECT id, username, email, password_hash, display_name, avatar_url, banner_url, status, is_bot, created_at, updated_at
 		FROM users
 		WHERE email = $1
 	`, email)
@@ -56,11 +59,41 @@ func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (
 
 func (r *PostgresUserRepository) GetByID(ctx context.Context, id uuid.UUID) (models.User, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, username, email, password_hash, display_name, avatar_url, status, is_bot, created_at, updated_at
+		SELECT id, username, email, password_hash, display_name, avatar_url, banner_url, status, is_bot, created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`, id)
 
+	return scanUserOrNotFound(row)
+}
+
+func (r *PostgresUserRepository) UpdateProfile(ctx context.Context, userID uuid.UUID, displayName *string, status string) (models.User, error) {
+	row := r.pool.QueryRow(ctx, `
+		UPDATE users
+		SET display_name = $2, status = $3, updated_at = now()
+		WHERE id = $1
+		RETURNING id, username, email, password_hash, display_name, avatar_url, banner_url, status, is_bot, created_at, updated_at
+	`, userID, displayName, status)
+	return scanUserOrNotFound(row)
+}
+
+func (r *PostgresUserRepository) SetAvatarURL(ctx context.Context, userID uuid.UUID, avatarURL string) (models.User, error) {
+	row := r.pool.QueryRow(ctx, `
+		UPDATE users
+		SET avatar_url = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING id, username, email, password_hash, display_name, avatar_url, banner_url, status, is_bot, created_at, updated_at
+	`, userID, avatarURL)
+	return scanUserOrNotFound(row)
+}
+
+func (r *PostgresUserRepository) SetBannerURL(ctx context.Context, userID uuid.UUID, bannerURL string) (models.User, error) {
+	row := r.pool.QueryRow(ctx, `
+		UPDATE users
+		SET banner_url = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING id, username, email, password_hash, display_name, avatar_url, banner_url, status, is_bot, created_at, updated_at
+	`, userID, bannerURL)
 	return scanUserOrNotFound(row)
 }
 
@@ -84,6 +117,7 @@ func scanUser(row pgx.Row) (models.User, error) {
 		&user.PasswordHash,
 		&user.DisplayName,
 		&user.AvatarURL,
+		&user.BannerURL,
 		&user.Status,
 		&user.IsBot,
 		&user.CreatedAt,

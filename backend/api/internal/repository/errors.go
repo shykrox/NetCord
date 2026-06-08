@@ -19,4 +19,5 @@ var (
 	ErrRoleConflict           = errors.New("role already exists")
 	ErrInviteNotFound         = errors.New("invite not found")
 	ErrInviteUnavailable      = errors.New("invite unavailable")
+	ErrAIJobNotFound          = errors.New("ai job not found")
 )

@@ -19,7 +19,17 @@ type CreateServerInput struct {
 	Description string `json:"description"`
 }
 
+type UpdateServerInput struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type CreateChannelInput struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+type UpdateChannelInput struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 }
@@ -50,6 +60,10 @@ type ServersResponse struct {
 
 type ChannelsResponse struct {
 	Channels []models.PublicChannel `json:"channels"`
+}
+
+type ServerMembersResponse struct {
+	Members []models.PublicServerMember `json:"members"`
 }
 
 type MessagesResponse struct {
@@ -101,6 +115,28 @@ func (s *ServerService) ListServers(ctx context.Context, userID uuid.UUID) (Serv
 	return ServersResponse{Servers: publicServers(servers)}, nil
 }
 
+func (s *ServerService) UpdateServer(ctx context.Context, userID, serverID uuid.UUID, input UpdateServerInput) (models.PublicServer, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Description = strings.TrimSpace(input.Description)
+	if fields := validateUpdateServerInput(input); len(fields) > 0 {
+		return models.PublicServer{}, &ValidationError{Fields: fields}
+	}
+
+	var description *string
+	if input.Description != "" {
+		description = &input.Description
+	}
+	server, err := s.servers.UpdateServerForOwner(ctx, serverID, userID, input.Name, description)
+	if err != nil {
+		return models.PublicServer{}, mapRepositoryError(err)
+	}
+	return server.Public(), nil
+}
+
+func (s *ServerService) DeleteServer(ctx context.Context, userID, serverID uuid.UUID) error {
+	return mapRepositoryError(s.servers.DeleteServerForOwner(ctx, serverID, userID))
+}
+
 func (s *ServerService) GetServer(ctx context.Context, userID, serverID uuid.UUID) (models.PublicServer, error) {
 	server, err := s.servers.GetServerForUser(ctx, serverID, userID)
 	if err != nil {
@@ -108,6 +144,14 @@ func (s *ServerService) GetServer(ctx context.Context, userID, serverID uuid.UUI
 	}
 
 	return server.Public(), nil
+}
+
+func (s *ServerService) ListServerMembers(ctx context.Context, userID, serverID uuid.UUID) (ServerMembersResponse, error) {
+	members, err := s.servers.ListServerMembersForUser(ctx, serverID, userID)
+	if err != nil {
+		return ServerMembersResponse{}, mapRepositoryError(err)
+	}
+	return ServerMembersResponse{Members: publicServerMembers(members)}, nil
 }
 
 func (s *ServerService) CreateChannel(ctx context.Context, userID, serverID uuid.UUID, input CreateChannelInput) (models.PublicChannel, error) {
@@ -145,6 +189,30 @@ func (s *ServerService) CreateChannel(ctx context.Context, userID, serverID uuid
 	}
 
 	return created.Public(), nil
+}
+
+func (s *ServerService) UpdateChannel(ctx context.Context, userID, channelID uuid.UUID, input UpdateChannelInput) (models.PublicChannel, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Type = strings.TrimSpace(input.Type)
+	if input.Type == "" {
+		input.Type = models.ChannelTypeText
+	}
+	if fields := validateUpdateChannelInput(input); len(fields) > 0 {
+		return models.PublicChannel{}, &ValidationError{Fields: fields}
+	}
+
+	updated, err := s.servers.UpdateChannelForOwner(ctx, channelID, userID, input.Name, input.Type)
+	if err != nil {
+		if errors.Is(err, repository.ErrChannelConflict) {
+			return models.PublicChannel{}, &ValidationError{Fields: map[string]string{"name": "channel name already exists in this server"}}
+		}
+		return models.PublicChannel{}, mapRepositoryError(err)
+	}
+	return updated.Public(), nil
+}
+
+func (s *ServerService) DeleteChannel(ctx context.Context, userID, channelID uuid.UUID) error {
+	return mapRepositoryError(s.servers.DeleteChannelForOwner(ctx, channelID, userID))
 }
 
 func (s *ServerService) ListChannels(ctx context.Context, userID, serverID uuid.UUID) (ChannelsResponse, error) {
@@ -287,6 +355,14 @@ func mapRepositoryError(err error) error {
 	default:
 		return err
 	}
+}
+
+func publicServerMembers(members []models.ServerMember) []models.PublicServerMember {
+	public := make([]models.PublicServerMember, 0, len(members))
+	for _, member := range members {
+		public = append(public, member.Public())
+	}
+	return public
 }
 
 func normalizeMessageListInput(input *ListMessagesInput) {

@@ -12,6 +12,8 @@ data/
 postgres-data/
 redis-data/
 minio-data/
+backups/
+bin/
 
 backend/api/netcord-api
 backend/api/coverage.out

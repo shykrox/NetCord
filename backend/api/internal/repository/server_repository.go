@@ -23,9 +23,14 @@ type MessageListOptions struct {
 
 type ServerRepository interface {
 	CreateServer(ctx context.Context, server models.Server, ownerID uuid.UUID) (models.Server, error)
+	UpdateServerForOwner(ctx context.Context, serverID, userID uuid.UUID, name string, description *string) (models.Server, error)
+	DeleteServerForOwner(ctx context.Context, serverID, userID uuid.UUID) error
 	ListServersForUser(ctx context.Context, userID uuid.UUID) ([]models.Server, error)
 	GetServerForUser(ctx context.Context, serverID, userID uuid.UUID) (models.Server, error)
+	ListServerMembersForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.ServerMember, error)
 	CreateChannel(ctx context.Context, channel models.Channel) (models.Channel, error)
+	UpdateChannelForOwner(ctx context.Context, channelID, userID uuid.UUID, name, channelType string) (models.Channel, error)
+	DeleteChannelForOwner(ctx context.Context, channelID, userID uuid.UUID) error
 	ListChannelsForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.Channel, error)
 	GetChannelForUser(ctx context.Context, channelID, userID uuid.UUID) (models.Channel, error)
 	CreateMessage(ctx context.Context, message models.Message, attachmentIDs []uuid.UUID) (models.Message, error)
@@ -83,6 +88,36 @@ func (r *PostgresServerRepository) CreateServer(ctx context.Context, server mode
 	return created, nil
 }
 
+func (r *PostgresServerRepository) UpdateServerForOwner(ctx context.Context, serverID, userID uuid.UUID, name string, description *string) (models.Server, error) {
+	server, err := scanServer(r.pool.QueryRow(ctx, `
+		UPDATE servers
+		SET name = $3, description = $4, updated_at = now()
+		WHERE id = $1 AND owner_id = $2
+		RETURNING id, owner_id, name, description, icon_url, created_at, updated_at
+	`, serverID, userID, name, description))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Server{}, ErrForbidden
+		}
+		return models.Server{}, err
+	}
+	return server, nil
+}
+
+func (r *PostgresServerRepository) DeleteServerForOwner(ctx context.Context, serverID, userID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM servers
+		WHERE id = $1 AND owner_id = $2
+	`, serverID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrForbidden
+	}
+	return nil
+}
+
 func (r *PostgresServerRepository) ListServersForUser(ctx context.Context, userID uuid.UUID) ([]models.Server, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT s.id, s.owner_id, s.name, s.description, s.icon_url, s.created_at, s.updated_at
@@ -117,6 +152,40 @@ func (r *PostgresServerRepository) GetServerForUser(ctx context.Context, serverI
 	return server, nil
 }
 
+func (r *PostgresServerRepository) ListServerMembersForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.ServerMember, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT sm.server_id, u.id, u.username, sm.role, sm.joined_at, COALESCE(up.status, 'offline')
+		FROM server_members viewer
+		JOIN server_members sm ON sm.server_id = viewer.server_id
+		JOIN users u ON u.id = sm.user_id
+		LEFT JOIN user_presence up ON up.user_id = u.id
+		WHERE viewer.server_id = $1 AND viewer.user_id = $2
+		ORDER BY sm.role DESC, u.username ASC
+	`, serverID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	members := make([]models.ServerMember, 0)
+	for rows.Next() {
+		var member models.ServerMember
+		if err := rows.Scan(&member.ServerID, &member.UserID, &member.Username, &member.Role, &member.JoinedAt, &member.Status); err != nil {
+			return nil, err
+		}
+		members = append(members, member)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		if _, err := r.GetServerForUser(ctx, serverID, userID); err != nil {
+			return nil, err
+		}
+	}
+	return members, nil
+}
+
 func (r *PostgresServerRepository) CreateChannel(ctx context.Context, channel models.Channel) (models.Channel, error) {
 	row := r.pool.QueryRow(ctx, `
 		INSERT INTO channels (id, server_id, name, type, position)
@@ -132,6 +201,45 @@ func (r *PostgresServerRepository) CreateChannel(ctx context.Context, channel mo
 		return models.Channel{}, err
 	}
 	return created, nil
+}
+
+func (r *PostgresServerRepository) UpdateChannelForOwner(ctx context.Context, channelID, userID uuid.UUID, name, channelType string) (models.Channel, error) {
+	channel, err := scanChannel(r.pool.QueryRow(ctx, `
+		UPDATE channels c
+		SET name = $3, type = $4, updated_at = now()
+		FROM servers s
+		WHERE c.id = $1
+			AND c.server_id = s.id
+			AND s.owner_id = $2
+		RETURNING c.id, c.server_id, c.name, c.type, c.position, c.created_at, c.updated_at
+	`, channelID, userID, name, channelType))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Channel{}, ErrForbidden
+		}
+		if isUniqueViolation(err) {
+			return models.Channel{}, ErrChannelConflict
+		}
+		return models.Channel{}, err
+	}
+	return channel, nil
+}
+
+func (r *PostgresServerRepository) DeleteChannelForOwner(ctx context.Context, channelID, userID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM channels c
+		USING servers s
+		WHERE c.id = $1
+			AND c.server_id = s.id
+			AND s.owner_id = $2
+	`, channelID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrForbidden
+	}
+	return nil
 }
 
 func (r *PostgresServerRepository) ListChannelsForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.Channel, error) {

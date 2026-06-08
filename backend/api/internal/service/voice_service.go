@@ -61,7 +61,7 @@ func (s *VoiceService) Join(ctx context.Context, userID uuid.UUID, input JoinVoi
 		}
 	}
 	if s.liveKitURL == "" || s.apiKey == "" || s.apiSecret == "" {
-		return VoiceSessionResponse{}, ErrUnavailable
+		return VoiceSessionResponse{}, ErrVoiceNotConfigured
 	}
 
 	room := voiceRoomName(channel.ServerID, channel.ID)
