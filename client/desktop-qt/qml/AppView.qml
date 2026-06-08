@@ -1,9 +1,80 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 
 Rectangle {
+    id: appRoot
     color: "#111318"
+    property string editMessageId: ""
+
+    FileDialog {
+        id: uploadDialog
+        title: "Attach file"
+        onAccepted: netcord.uploadFile(selectedFile)
+    }
+
+    Dialog {
+        id: createServerDialog
+        title: "Create server"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onAccepted: {
+            netcord.createServer(serverName.text, serverDescription.text)
+            serverName.text = ""
+            serverDescription.text = ""
+        }
+
+        ColumnLayout {
+            spacing: 10
+            TextField { id: serverName; placeholderText: "Server name"; Layout.preferredWidth: 320 }
+            TextField { id: serverDescription; placeholderText: "Description" }
+        }
+    }
+
+    Dialog {
+        id: createChannelDialog
+        title: "Create channel"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onAccepted: {
+            netcord.createChannel(channelName.text, channelType.currentText)
+            channelName.text = ""
+        }
+
+        ColumnLayout {
+            spacing: 10
+            TextField { id: channelName; placeholderText: "Channel name"; Layout.preferredWidth: 320 }
+            ComboBox { id: channelType; model: ["text", "voice"] }
+        }
+    }
+
+    Dialog {
+        id: editMessageDialog
+        title: "Edit message"
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        anchors.centerIn: parent
+        onAccepted: netcord.editMessage(appRoot.editMessageId, editMessageText.text)
+
+        TextArea {
+            id: editMessageText
+            Layout.preferredWidth: 420
+            Layout.preferredHeight: 120
+            wrapMode: TextArea.Wrap
+        }
+    }
+
+    DropArea {
+        anchors.fill: parent
+        onDropped: function(drop) {
+            if (drop.urls.length > 0) {
+                netcord.uploadFile(drop.urls[0])
+            }
+        }
+    }
 
     RowLayout {
         anchors.fill: parent
@@ -33,6 +104,19 @@ Rectangle {
                         font.bold: true
                         font.pixelSize: 22
                     }
+                }
+
+                Button {
+                    text: "+"
+                    Layout.fillWidth: true
+                    onClicked: createServerDialog.open()
+                }
+
+                Button {
+                    text: "Refresh"
+                    Layout.fillWidth: true
+                    enabled: !netcord.busy
+                    onClicked: netcord.refreshServers()
                 }
 
                 ListView {
@@ -67,7 +151,7 @@ Rectangle {
                 }
 
                 Button {
-                    text: "Out"
+                    text: "Logout"
                     Layout.fillWidth: true
                     onClicked: netcord.logout()
                 }
@@ -84,13 +168,29 @@ Rectangle {
                 anchors.margins: 16
                 spacing: 12
 
-                Label {
-                    text: netcord.selectedServer.name || "NetCord"
-                    color: "#f2f5fb"
-                    font.pixelSize: 18
-                    font.bold: true
-                    elide: Text.ElideRight
+                RowLayout {
                     Layout.fillWidth: true
+
+                    Label {
+                        text: netcord.selectedServer.name || "NetCord"
+                        color: "#f2f5fb"
+                        font.pixelSize: 18
+                        font.bold: true
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    Button {
+                        text: "+"
+                        enabled: !!netcord.selectedServer.id
+                        onClicked: createChannelDialog.open()
+                    }
+
+                    Button {
+                        text: "Refresh"
+                        enabled: !!netcord.selectedServer.id && !netcord.busy
+                        onClicked: netcord.refreshChannels()
+                    }
                 }
 
                 Rectangle {
@@ -225,6 +325,24 @@ Rectangle {
                             radius: 5
                             color: netcord.gatewayConnected ? "#37d7a7" : "#6f7788"
                         }
+
+                        Label {
+                            text: netcord.gatewayConnected ? "Live" : "Offline"
+                            color: netcord.gatewayConnected ? "#9af0d4" : "#a8b0bf"
+                            font.pixelSize: 12
+                        }
+
+                        Button {
+                            text: "Reconnect"
+                            enabled: netcord.authenticated
+                            onClicked: netcord.reconnectGateway()
+                        }
+
+                        Button {
+                            text: "Refresh"
+                            enabled: !!netcord.selectedChannel.id && !netcord.busy
+                            onClicked: netcord.refreshMessages()
+                        }
                     }
                 }
 
@@ -235,7 +353,8 @@ Rectangle {
                     clip: true
                     spacing: 6
                     model: netcord.messages
-                    onCountChanged: Qt.callLater(positionViewAtEnd)
+                    onCountChanged: Qt.callLater(function() { messageList.positionViewAtEnd() })
+                    onHeightChanged: Qt.callLater(function() { messageList.positionViewAtEnd() })
 
                     delegate: Rectangle {
                         width: messageList.width
@@ -283,10 +402,39 @@ Rectangle {
                                     }
 
                                     Label {
-                                        text: modelData.content
+                                        text: modelData.content || ""
+                                        visible: text.length > 0
                                         color: "#eef2f7"
                                         wrapMode: Text.Wrap
                                         Layout.fillWidth: true
+                                    }
+
+                                    RowLayout {
+                                        spacing: 6
+
+                                        Button {
+                                            text: "Edit"
+                                            visible: modelData.author_id === netcord.currentUser.id
+                                            Layout.preferredHeight: 26
+                                            onClicked: {
+                                                appRoot.editMessageId = modelData.id
+                                                editMessageText.text = modelData.content || ""
+                                                editMessageDialog.open()
+                                            }
+                                        }
+
+                                        Button {
+                                            text: "Delete"
+                                            visible: modelData.author_id === netcord.currentUser.id
+                                            Layout.preferredHeight: 26
+                                            onClicked: netcord.deleteMessage(modelData.id)
+                                        }
+
+                                        Label {
+                                            text: modelData.edited_at ? "edited" : ""
+                                            color: "#788498"
+                                            font.pixelSize: 11
+                                        }
                                     }
 
                                     Repeater {
@@ -317,6 +465,11 @@ Rectangle {
                                                     color: "#91a0b5"
                                                 }
                                             }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                onClicked: netcord.openAttachment(modelData.download_url)
+                                            }
                                         }
                                     }
                                 }
@@ -326,42 +479,281 @@ Rectangle {
                 }
 
                 Rectangle {
+                    visible: netcord.searchResults.length > 0
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 84
+                    Layout.preferredHeight: visible ? 96 : 0
+                    color: "#181c25"
+                    border.color: "#2a303c"
+
+                    ListView {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        clip: true
+                        model: netcord.searchResults
+                        delegate: Label {
+                            width: ListView.view.width
+                            text: (modelData.created_at || "").substring(0, 19) + "  " + (modelData.content || "")
+                            color: "#d8e1ee"
+                            elide: Text.ElideRight
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: netcord.pendingAttachments.length > 0 ? 168 : 114
                     color: "#151820"
 
-                    RowLayout {
+                    ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 14
-                        spacing: 10
+                        spacing: 8
 
-                        TextArea {
-                            id: composer
-                            enabled: !!netcord.selectedChannel.id
-                            placeholderText: netcord.selectedChannel.id ? "Message #" + netcord.selectedChannel.name : ""
-                            color: "#f2f5fb"
-                            placeholderTextColor: "#707b8f"
-                            wrapMode: TextArea.Wrap
+                        ListView {
+                            visible: netcord.pendingAttachments.length > 0
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: visible ? 36 : 0
+                            orientation: ListView.Horizontal
+                            spacing: 8
+                            clip: true
+                            model: netcord.pendingAttachments
+
+                            delegate: Rectangle {
+                                width: Math.min(240, attachmentLabel.implicitWidth + 54)
+                                height: 32
+                                radius: 6
+                                color: "#232936"
+                                border.color: "#394354"
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 8
+                                    spacing: 6
+
+                                    Label {
+                                        id: attachmentLabel
+                                        text: modelData.original_filename || "file"
+                                        color: "#dce4ef"
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Button {
+                                        text: "X"
+                                        Layout.preferredWidth: 30
+                                        Layout.preferredHeight: 24
+                                        onClicked: netcord.removePendingAttachment(modelData.id)
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Button {
+                                text: "Older"
+                                enabled: netcord.messages.length > 0 && !netcord.busy
+                                onClicked: netcord.loadOlderMessages()
+                            }
+
+                            TextField {
+                                id: searchBox
+                                placeholderText: "Search current channel"
+                                Layout.fillWidth: true
+                                onAccepted: netcord.searchMessages(text)
+                            }
+
+                            Button {
+                                text: "Search"
+                                enabled: searchBox.text.trim().length > 0
+                                onClicked: netcord.searchMessages(searchBox.text)
+                            }
+
+                            Button {
+                                text: "Clear"
+                                onClicked: {
+                                    searchBox.text = ""
+                                    netcord.clearSearchResults()
+                                }
+                            }
+                        }
+
+                        Label {
+                            text: netcord.typingText
+                            visible: text.length > 0
+                            color: "#91a0b5"
+                            Layout.fillWidth: true
+                        }
+
+                        RowLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            background: Rectangle {
-                                radius: 8
-                                color: "#232936"
-                                border.color: "#303747"
-                            }
-                        }
+                            spacing: 10
 
-                        Button {
-                            text: "Send"
-                            enabled: composer.text.trim().length > 0 && !!netcord.selectedChannel.id && !netcord.busy
-                            Layout.preferredWidth: 96
-                            Layout.fillHeight: true
-                            highlighted: true
-                            onClicked: {
-                                netcord.sendMessage(composer.text)
-                                composer.text = ""
+                            Button {
+                                text: "Attach"
+                                enabled: !!netcord.selectedChannel.id && !netcord.busy
+                                Layout.preferredWidth: 84
+                                Layout.fillHeight: true
+                                onClicked: uploadDialog.open()
+                            }
+
+                            TextArea {
+                                id: composer
+                                enabled: !!netcord.selectedChannel.id
+                                placeholderText: netcord.selectedChannel.id ? "Message #" + netcord.selectedChannel.name : ""
+                                color: "#f2f5fb"
+                                placeholderTextColor: "#707b8f"
+                                wrapMode: TextArea.Wrap
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                background: Rectangle {
+                                    radius: 8
+                                    color: "#232936"
+                                    border.color: "#303747"
+                                }
+                                onTextChanged: {
+                                    if (text.trim().length > 0) {
+                                        netcord.sendTypingStart()
+                                    }
+                                }
+                            }
+
+                            Button {
+                                text: "Send"
+                                enabled: (composer.text.trim().length > 0 || netcord.pendingAttachments.length > 0) && !!netcord.selectedChannel.id && !netcord.busy
+                                Layout.preferredWidth: 96
+                                Layout.fillHeight: true
+                                highlighted: true
+                                onClicked: {
+                                    netcord.sendMessage(composer.text)
+                                    composer.text = ""
+                                }
                             }
                         }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.preferredWidth: 280
+            Layout.fillHeight: true
+            color: "#171a22"
+            border.color: "#262b36"
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 10
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "Social"
+                        color: "#f3f6fb"
+                        font.bold: true
+                        Layout.fillWidth: true
+                    }
+                    Button {
+                        text: "Refresh"
+                        onClicked: {
+                            netcord.loadFriends()
+                            netcord.loadFriendRequests()
+                            netcord.loadDMs()
+                        }
+                    }
+                }
+
+                TextField {
+                    id: friendIdField
+                    Layout.fillWidth: true
+                    placeholderText: "User UUID"
+                    onAccepted: netcord.sendFriendRequest(text)
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Button {
+                        text: "Add"
+                        enabled: friendIdField.text.trim().length > 0
+                        onClicked: netcord.sendFriendRequest(friendIdField.text)
+                    }
+                    Button {
+                        text: "DM"
+                        enabled: friendIdField.text.trim().length > 0
+                        onClicked: netcord.createDM(friendIdField.text)
+                    }
+                }
+
+                Label { text: "Requests"; color: "#95a0b2"; font.bold: true }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 96
+                    clip: true
+                    model: netcord.friendRequests
+                    delegate: RowLayout {
+                        width: ListView.view.width
+                        Label {
+                            text: (modelData.requester_id || modelData.recipient_id || "").substring(0, 8)
+                            color: "#d8e1ee"
+                            Layout.fillWidth: true
+                        }
+                        Button {
+                            text: "OK"
+                            visible: modelData.recipient_id === netcord.currentUser.id
+                            onClicked: netcord.acceptFriendRequest(modelData.id)
+                        }
+                        Button {
+                            text: "No"
+                            visible: modelData.recipient_id === netcord.currentUser.id
+                            onClicked: netcord.declineFriendRequest(modelData.id)
+                        }
+                    }
+                }
+
+                Label { text: "Friends"; color: "#95a0b2"; font.bold: true }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 110
+                    clip: true
+                    model: netcord.friends
+                    delegate: Label {
+                        width: ListView.view.width
+                        text: modelData.username || modelData.user_id
+                        color: "#d8e1ee"
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Label { text: "DMs"; color: "#95a0b2"; font.bold: true }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 90
+                    clip: true
+                    model: netcord.dmConversations
+                    delegate: Label {
+                        width: ListView.view.width
+                        text: (modelData.name || modelData.type || "dm") + "  " + (modelData.id || "").substring(0, 8)
+                        color: "#d8e1ee"
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Label { text: "AI jobs"; color: "#95a0b2"; font.bold: true }
+                ListView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                    model: netcord.aiJobs
+                    delegate: Label {
+                        width: ListView.view.width
+                        text: (modelData.command || "job") + " - " + (modelData.status || "")
+                        color: "#d8e1ee"
+                        elide: Text.ElideRight
                     }
                 }
             }

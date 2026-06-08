@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS ai_jobs;
+
+ALTER TABLE users
+    DROP COLUMN IF EXISTS is_bot;

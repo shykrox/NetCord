@@ -18,6 +18,10 @@ type Config struct {
 	MinIOSecretKey         string
 	MinIOBucketAttachments string
 	MaxUploadBytes         int64
+	LiveKitURL             string
+	LiveKitAPIKey          string
+	LiveKitAPISecret       string
+	ComfyUIURL             string
 }
 
 func Load() Config {
@@ -33,6 +37,10 @@ func Load() Config {
 		MinIOSecretKey:         env("NETCORD_MINIO_SECRET_KEY", "CHANGE_ME"),
 		MinIOBucketAttachments: env("NETCORD_MINIO_BUCKET_ATTACHMENTS", "netcord-attachments"),
 		MaxUploadBytes:         int64(envInt("NETCORD_MAX_UPLOAD_BYTES", 25*1024*1024)),
+		LiveKitURL:             env("NETCORD_LIVEKIT_URL", ""),
+		LiveKitAPIKey:          env("NETCORD_LIVEKIT_API_KEY", ""),
+		LiveKitAPISecret:       env("NETCORD_LIVEKIT_API_SECRET", ""),
+		ComfyUIURL:             env("NETCORD_COMFYUI_URL", ""),
 	}
 }
 

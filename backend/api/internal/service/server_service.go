@@ -12,6 +12,7 @@ import (
 )
 
 const defaultMessageLimit = 50
+const maxMessageLimit = 100
 
 type CreateServerInput struct {
 	Name        string `json:"name"`
@@ -20,11 +21,27 @@ type CreateServerInput struct {
 
 type CreateChannelInput struct {
 	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 type CreateMessageInput struct {
 	Content     string      `json:"content"`
 	Attachments []uuid.UUID `json:"attachments"`
+}
+
+type ListMessagesInput struct {
+	Before uuid.UUID
+	After  uuid.UUID
+	Limit  int
+}
+
+type UpdateMessageInput struct {
+	Content string `json:"content"`
+}
+
+type SearchMessagesInput struct {
+	Query string
+	Limit int
 }
 
 type ServersResponse struct {
@@ -95,6 +112,10 @@ func (s *ServerService) GetServer(ctx context.Context, userID, serverID uuid.UUI
 
 func (s *ServerService) CreateChannel(ctx context.Context, userID, serverID uuid.UUID, input CreateChannelInput) (models.PublicChannel, error) {
 	input.Name = strings.TrimSpace(input.Name)
+	input.Type = strings.TrimSpace(input.Type)
+	if input.Type == "" {
+		input.Type = models.ChannelTypeText
+	}
 	if fields := validateCreateChannelInput(input); len(fields) > 0 {
 		return models.PublicChannel{}, &ValidationError{Fields: fields}
 	}
@@ -107,7 +128,7 @@ func (s *ServerService) CreateChannel(ctx context.Context, userID, serverID uuid
 		ID:       uuid.New(),
 		ServerID: serverID,
 		Name:     input.Name,
-		Type:     models.ChannelTypeText,
+		Type:     input.Type,
 		Position: 0,
 	}
 
@@ -139,17 +160,38 @@ func (s *ServerService) ListChannels(ctx context.Context, userID, serverID uuid.
 	return ChannelsResponse{Channels: publicChannels(channels)}, nil
 }
 
-func (s *ServerService) ListMessages(ctx context.Context, userID, channelID uuid.UUID) (MessagesResponse, error) {
-	if _, err := s.servers.GetChannelForUser(ctx, channelID, userID); err != nil {
-		return MessagesResponse{}, mapRepositoryError(err)
+func (s *ServerService) ListMessages(ctx context.Context, userID, channelID uuid.UUID, input ListMessagesInput) (MessagesResponse, error) {
+	normalizeMessageListInput(&input)
+	if fields := validateListMessagesInput(input); len(fields) > 0 {
+		return MessagesResponse{}, &ValidationError{Fields: fields}
 	}
 
-	messages, err := s.servers.ListMessagesForChannelUser(ctx, channelID, userID, defaultMessageLimit)
+	channel, err := s.servers.GetChannelForUser(ctx, channelID, userID)
+	if err != nil {
+		return MessagesResponse{}, mapRepositoryError(err)
+	}
+	if channel.Type != models.ChannelTypeText {
+		return MessagesResponse{}, ErrNotFound
+	}
+
+	messages, err := s.servers.ListMessagesForChannelUser(ctx, channelID, userID, repository.MessageListOptions{
+		Before: input.Before,
+		After:  input.After,
+		Limit:  input.Limit,
+	})
 	if err != nil {
 		return MessagesResponse{}, mapRepositoryError(err)
 	}
 
 	return MessagesResponse{Messages: publicMessages(messages)}, nil
+}
+
+func (s *ServerService) GetChannel(ctx context.Context, userID, channelID uuid.UUID) (models.PublicChannel, error) {
+	channel, err := s.servers.GetChannelForUser(ctx, channelID, userID)
+	if err != nil {
+		return models.PublicChannel{}, mapRepositoryError(err)
+	}
+	return channel.Public(), nil
 }
 
 func (s *ServerService) CreateMessage(ctx context.Context, userID, channelID uuid.UUID, input CreateMessageInput) (models.PublicMessage, error) {
@@ -161,6 +203,9 @@ func (s *ServerService) CreateMessage(ctx context.Context, userID, channelID uui
 	channel, err := s.servers.GetChannelForUser(ctx, channelID, userID)
 	if err != nil {
 		return models.PublicMessage{}, mapRepositoryError(err)
+	}
+	if channel.Type != models.ChannelTypeText {
+		return models.PublicMessage{}, ErrNotFound
 	}
 
 	message := models.Message{
@@ -179,14 +224,77 @@ func (s *ServerService) CreateMessage(ctx context.Context, userID, channelID uui
 	return created.Public(), nil
 }
 
+func (s *ServerService) UpdateMessage(ctx context.Context, userID, messageID uuid.UUID, input UpdateMessageInput) (models.PublicMessage, error) {
+	input.Content = strings.TrimSpace(input.Content)
+	if fields := validateUpdateMessageInput(input); len(fields) > 0 {
+		return models.PublicMessage{}, &ValidationError{Fields: fields}
+	}
+
+	message, err := s.servers.UpdateMessageForUser(ctx, messageID, userID, input.Content)
+	if err != nil {
+		return models.PublicMessage{}, mapRepositoryError(err)
+	}
+
+	return message.Public(), nil
+}
+
+func (s *ServerService) DeleteMessage(ctx context.Context, userID, messageID uuid.UUID) (models.PublicMessage, error) {
+	message, err := s.servers.DeleteMessageForUser(ctx, messageID, userID)
+	if err != nil {
+		return models.PublicMessage{}, mapRepositoryError(err)
+	}
+
+	return message.Public(), nil
+}
+
+func (s *ServerService) SearchMessages(ctx context.Context, userID, channelID uuid.UUID, input SearchMessagesInput) (MessagesResponse, error) {
+	input.Query = strings.TrimSpace(input.Query)
+	if input.Limit <= 0 {
+		input.Limit = defaultMessageLimit
+	}
+	if input.Limit > maxMessageLimit {
+		input.Limit = maxMessageLimit
+	}
+	if fields := validateSearchMessagesInput(input); len(fields) > 0 {
+		return MessagesResponse{}, &ValidationError{Fields: fields}
+	}
+
+	channel, err := s.servers.GetChannelForUser(ctx, channelID, userID)
+	if err != nil {
+		return MessagesResponse{}, mapRepositoryError(err)
+	}
+	if channel.Type != models.ChannelTypeText {
+		return MessagesResponse{}, ErrNotFound
+	}
+
+	messages, err := s.servers.SearchMessagesForChannelUser(ctx, channelID, userID, input.Query, input.Limit)
+	if err != nil {
+		return MessagesResponse{}, mapRepositoryError(err)
+	}
+
+	return MessagesResponse{Messages: publicMessages(messages)}, nil
+}
+
 func mapRepositoryError(err error) error {
 	switch {
 	case errors.Is(err, repository.ErrServerNotFound),
 		errors.Is(err, repository.ErrChannelNotFound),
-		errors.Is(err, repository.ErrAttachmentNotFound):
+		errors.Is(err, repository.ErrAttachmentNotFound),
+		errors.Is(err, repository.ErrMessageNotFound):
 		return ErrNotFound
+	case errors.Is(err, repository.ErrForbidden):
+		return ErrForbidden
 	default:
 		return err
+	}
+}
+
+func normalizeMessageListInput(input *ListMessagesInput) {
+	if input.Limit <= 0 {
+		input.Limit = defaultMessageLimit
+	}
+	if input.Limit > maxMessageLimit {
+		input.Limit = maxMessageLimit
 	}
 }
 

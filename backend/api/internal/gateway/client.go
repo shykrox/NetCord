@@ -8,6 +8,7 @@ import (
 
 type Client struct {
 	UserID    uuid.UUID
+	Username  string
 	serverIDs map[uuid.UUID]struct{}
 	send      chan Event
 	done      chan struct{}
@@ -16,9 +17,10 @@ type Client struct {
 	closeOnce sync.Once
 }
 
-func newClient(userID uuid.UUID, serverIDs []uuid.UUID) *Client {
+func newClient(userID uuid.UUID, username string, serverIDs []uuid.UUID) *Client {
 	client := &Client{
 		UserID:    userID,
+		Username:  username,
 		serverIDs: make(map[uuid.UUID]struct{}, len(serverIDs)),
 		send:      make(chan Event, clientSendBufferSize),
 		done:      make(chan struct{}),

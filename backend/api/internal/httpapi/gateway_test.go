@@ -29,7 +29,7 @@ func TestGatewayWebSocketHelloAndHeartbeat(t *testing.T) {
 
 	tokenManager := newTestTokenManager(t)
 	token := newTestToken(t, tokenManager, userID)
-	router := NewRouter(nil, service.NewServerService(repo), nil, tokenManager, gateway.NewHub())
+	router := NewRouter(nil, service.NewServerService(repo), nil, nil, tokenManager, gateway.NewHub())
 	server := httptest.NewServer(router)
 	defer server.Close()
 
@@ -78,7 +78,7 @@ func TestCreateMessageBroadcastsGatewayEvent(t *testing.T) {
 	token := newTestToken(t, tokenManager, userID)
 	hub := gateway.NewHub()
 	client := hub.Register(userID, []uuid.UUID{serverID})
-	router := NewRouter(nil, service.NewServerService(repo), nil, tokenManager, hub)
+	router := NewRouter(nil, service.NewServerService(repo), nil, nil, tokenManager, hub)
 
 	request := httptest.NewRequest(
 		http.MethodPost,
@@ -215,7 +215,7 @@ func (r *httpFakeServerRepository) CreateMessage(ctx context.Context, message mo
 	return message, nil
 }
 
-func (r *httpFakeServerRepository) ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, limit int) ([]models.Message, error) {
+func (r *httpFakeServerRepository) ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, options repository.MessageListOptions) ([]models.Message, error) {
 	channel, err := r.GetChannelForUser(ctx, channelID, userID)
 	if err != nil {
 		return nil, err
@@ -228,4 +228,58 @@ func (r *httpFakeServerRepository) ListMessagesForChannelUser(ctx context.Contex
 		}
 	}
 	return messages, nil
+}
+
+func (r *httpFakeServerRepository) SearchMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, query string, limit int) ([]models.Message, error) {
+	channel, err := r.GetChannelForUser(ctx, channelID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	messages := make([]models.Message, 0)
+	for _, message := range r.messages {
+		if message.ChannelID == channel.ID && strings.Contains(message.Content, query) {
+			messages = append(messages, message)
+		}
+	}
+	return messages, nil
+}
+
+func (r *httpFakeServerRepository) UpdateMessageForUser(ctx context.Context, messageID, userID uuid.UUID, content string) (models.Message, error) {
+	for i, message := range r.messages {
+		if message.ID != messageID {
+			continue
+		}
+		if _, ok := r.members[message.ServerID][userID]; !ok {
+			return models.Message{}, repository.ErrMessageNotFound
+		}
+		if message.AuthorID != userID {
+			return models.Message{}, repository.ErrForbidden
+		}
+		now := time.Now().UTC()
+		r.messages[i].Content = content
+		r.messages[i].UpdatedAt = now
+		r.messages[i].EditedAt = &now
+		return r.messages[i], nil
+	}
+	return models.Message{}, repository.ErrMessageNotFound
+}
+
+func (r *httpFakeServerRepository) DeleteMessageForUser(ctx context.Context, messageID, userID uuid.UUID) (models.Message, error) {
+	for i, message := range r.messages {
+		if message.ID != messageID {
+			continue
+		}
+		if _, ok := r.members[message.ServerID][userID]; !ok {
+			return models.Message{}, repository.ErrMessageNotFound
+		}
+		if message.AuthorID != userID {
+			return models.Message{}, repository.ErrForbidden
+		}
+		now := time.Now().UTC()
+		r.messages[i].UpdatedAt = now
+		r.messages[i].DeletedAt = &now
+		return r.messages[i], nil
+	}
+	return models.Message{}, repository.ErrMessageNotFound
 }

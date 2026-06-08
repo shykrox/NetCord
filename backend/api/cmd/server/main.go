@@ -37,6 +37,9 @@ func main() {
 
 	userRepo := repository.NewPostgresUserRepository(pool)
 	serverRepo := repository.NewPostgresServerRepository(pool)
+	socialRepo := repository.NewPostgresSocialRepository(pool)
+	permissionRepo := repository.NewPostgresPermissionRepository(pool)
+	aiRepo := repository.NewPostgresAIRepository(pool)
 	objectStore, err := storage.NewMinIOObjectStore(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey)
 	if err != nil {
 		logger.Error("configure minio", "error", err)
@@ -50,8 +53,24 @@ func main() {
 	authService := service.NewAuthService(userRepo, tokenManager)
 	serverService := service.NewServerService(serverRepo)
 	fileService := service.NewFileService(serverRepo, objectStore, cfg.MinIOBucketAttachments, cfg.MaxUploadBytes)
+	presenceService := service.NewPresenceService(userRepo)
+	socialService := service.NewSocialService(socialRepo, userRepo)
+	permissionService := service.NewPermissionService(permissionRepo)
+	voiceService := service.NewVoiceService(serverRepo, permissionService, cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
+	aiService := service.NewAIService(aiRepo, cfg.ComfyUIURL)
 	gatewayHub := gateway.NewHub()
-	router := httpapi.NewRouter(authService, serverService, fileService, tokenManager, gatewayHub)
+	router := httpapi.NewRouterWithConfig(httpapi.RouterConfig{
+		AuthService:       authService,
+		ServerService:     serverService,
+		FileService:       fileService,
+		PresenceService:   presenceService,
+		SocialService:     socialService,
+		PermissionService: permissionService,
+		VoiceService:      voiceService,
+		AIService:         aiService,
+		Tokens:            tokenManager,
+		GatewayHub:        gatewayHub,
+	})
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,6 +116,68 @@ func TestCreateMessageAttachesUploadedFiles(t *testing.T) {
 	}
 }
 
+func TestUpdateMessageRequiresAuthor(t *testing.T) {
+	repo := newFakeServerRepository()
+	service := NewServerService(repo)
+	authorID := uuid.New()
+	otherID := uuid.New()
+	serverID := uuid.New()
+	channelID := uuid.New()
+	messageID := uuid.New()
+	repo.servers[serverID] = models.Server{ID: serverID, OwnerID: authorID, Name: "NetCord"}
+	repo.members[serverID] = map[uuid.UUID]string{
+		authorID: models.ServerRoleOwner,
+		otherID:  models.ServerRoleMember,
+	}
+	repo.channels[channelID] = models.Channel{ID: channelID, ServerID: serverID, Name: "general", Type: models.ChannelTypeText}
+	repo.messages = append(repo.messages, models.Message{
+		ID:        messageID,
+		ServerID:  serverID,
+		ChannelID: channelID,
+		AuthorID:  authorID,
+		Content:   "original",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+
+	_, err := service.UpdateMessage(context.Background(), otherID, messageID, UpdateMessageInput{Content: "nope"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestUpdateMessageEditsOwnContent(t *testing.T) {
+	repo := newFakeServerRepository()
+	service := NewServerService(repo)
+	userID := uuid.New()
+	serverID := uuid.New()
+	channelID := uuid.New()
+	messageID := uuid.New()
+	repo.servers[serverID] = models.Server{ID: serverID, OwnerID: userID, Name: "NetCord"}
+	repo.members[serverID] = map[uuid.UUID]string{userID: models.ServerRoleOwner}
+	repo.channels[channelID] = models.Channel{ID: channelID, ServerID: serverID, Name: "general", Type: models.ChannelTypeText}
+	repo.messages = append(repo.messages, models.Message{
+		ID:        messageID,
+		ServerID:  serverID,
+		ChannelID: channelID,
+		AuthorID:  userID,
+		Content:   "original",
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	})
+
+	message, err := service.UpdateMessage(context.Background(), userID, messageID, UpdateMessageInput{Content: " edited "})
+	if err != nil {
+		t.Fatalf("update message: %v", err)
+	}
+	if message.Content != "edited" {
+		t.Fatalf("expected edited content, got %q", message.Content)
+	}
+	if message.EditedAt == nil {
+		t.Fatalf("expected edited_at to be set")
+	}
+}
+
 type fakeServerRepository struct {
 	servers     map[uuid.UUID]models.Server
 	members     map[uuid.UUID]map[uuid.UUID]string
@@ -223,7 +286,7 @@ func (r *fakeServerRepository) CreateMessage(ctx context.Context, message models
 	return message, nil
 }
 
-func (r *fakeServerRepository) ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, limit int) ([]models.Message, error) {
+func (r *fakeServerRepository) ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, options repository.MessageListOptions) ([]models.Message, error) {
 	channel, err := r.GetChannelForUser(ctx, channelID, userID)
 	if err != nil {
 		return nil, err
@@ -231,9 +294,63 @@ func (r *fakeServerRepository) ListMessagesForChannelUser(ctx context.Context, c
 
 	messages := make([]models.Message, 0)
 	for _, message := range r.messages {
-		if message.ChannelID == channel.ID {
+		if message.ChannelID == channel.ID && message.DeletedAt == nil {
 			messages = append(messages, message)
 		}
 	}
 	return messages, nil
+}
+
+func (r *fakeServerRepository) SearchMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, query string, limit int) ([]models.Message, error) {
+	channel, err := r.GetChannelForUser(ctx, channelID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	messages := make([]models.Message, 0)
+	for _, message := range r.messages {
+		if message.ChannelID == channel.ID && message.DeletedAt == nil && strings.Contains(message.Content, query) {
+			messages = append(messages, message)
+		}
+	}
+	return messages, nil
+}
+
+func (r *fakeServerRepository) UpdateMessageForUser(ctx context.Context, messageID, userID uuid.UUID, content string) (models.Message, error) {
+	for i, message := range r.messages {
+		if message.ID != messageID || message.DeletedAt != nil {
+			continue
+		}
+		if _, ok := r.members[message.ServerID][userID]; !ok {
+			return models.Message{}, repository.ErrMessageNotFound
+		}
+		if message.AuthorID != userID {
+			return models.Message{}, repository.ErrForbidden
+		}
+		now := time.Now().UTC()
+		r.messages[i].Content = content
+		r.messages[i].UpdatedAt = now
+		r.messages[i].EditedAt = &now
+		return r.messages[i], nil
+	}
+	return models.Message{}, repository.ErrMessageNotFound
+}
+
+func (r *fakeServerRepository) DeleteMessageForUser(ctx context.Context, messageID, userID uuid.UUID) (models.Message, error) {
+	for i, message := range r.messages {
+		if message.ID != messageID || message.DeletedAt != nil {
+			continue
+		}
+		if _, ok := r.members[message.ServerID][userID]; !ok {
+			return models.Message{}, repository.ErrMessageNotFound
+		}
+		if message.AuthorID != userID {
+			return models.Message{}, repository.ErrForbidden
+		}
+		now := time.Now().UTC()
+		r.messages[i].UpdatedAt = now
+		r.messages[i].DeletedAt = &now
+		return r.messages[i], nil
+	}
+	return models.Message{}, repository.ErrMessageNotFound
 }

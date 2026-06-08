@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"netcord/backend/api/internal/models"
 
@@ -14,6 +15,12 @@ import (
 
 const defaultChannelPosition = 0
 
+type MessageListOptions struct {
+	Before uuid.UUID
+	After  uuid.UUID
+	Limit  int
+}
+
 type ServerRepository interface {
 	CreateServer(ctx context.Context, server models.Server, ownerID uuid.UUID) (models.Server, error)
 	ListServersForUser(ctx context.Context, userID uuid.UUID) ([]models.Server, error)
@@ -22,7 +29,10 @@ type ServerRepository interface {
 	ListChannelsForUser(ctx context.Context, serverID, userID uuid.UUID) ([]models.Channel, error)
 	GetChannelForUser(ctx context.Context, channelID, userID uuid.UUID) (models.Channel, error)
 	CreateMessage(ctx context.Context, message models.Message, attachmentIDs []uuid.UUID) (models.Message, error)
-	ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, limit int) ([]models.Message, error)
+	ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, options MessageListOptions) ([]models.Message, error)
+	SearchMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, query string, limit int) ([]models.Message, error)
+	UpdateMessageForUser(ctx context.Context, messageID, userID uuid.UUID, content string) (models.Message, error)
+	DeleteMessageForUser(ctx context.Context, messageID, userID uuid.UUID) (models.Message, error)
 }
 
 type FileRepository interface {
@@ -170,7 +180,7 @@ func (r *PostgresServerRepository) CreateMessage(ctx context.Context, message mo
 	row := tx.QueryRow(ctx, `
 		INSERT INTO messages (id, server_id, channel_id, author_id, content)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, server_id, channel_id, author_id, content, created_at, updated_at
+		RETURNING id, server_id, channel_id, author_id, content, created_at, updated_at, edited_at, deleted_at
 	`, message.ID, message.ServerID, message.ChannelID, message.AuthorID, message.Content)
 
 	created, err := scanMessage(row)
@@ -209,16 +219,73 @@ func (r *PostgresServerRepository) CreateMessage(ctx context.Context, message mo
 	return created, nil
 }
 
-func (r *PostgresServerRepository) ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, limit int) ([]models.Message, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT m.id, m.server_id, m.channel_id, m.author_id, m.content, m.created_at, m.updated_at
-		FROM messages m
-		JOIN channels c ON c.id = m.channel_id
-		JOIN server_members sm ON sm.server_id = c.server_id
-		WHERE m.channel_id = $1 AND sm.user_id = $2
-		ORDER BY m.created_at ASC
-		LIMIT $3
-	`, channelID, userID, limit)
+func (r *PostgresServerRepository) ListMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, options MessageListOptions) ([]models.Message, error) {
+	limit := options.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+
+	var rows pgx.Rows
+	var err error
+	switch {
+	case options.Before != uuid.Nil:
+		rows, err = r.pool.Query(ctx, `
+			SELECT *
+			FROM (
+				SELECT m.id, m.server_id, m.channel_id, m.author_id, m.content, m.created_at, m.updated_at,
+					m.edited_at, m.deleted_at
+				FROM messages m
+				JOIN channels c ON c.id = m.channel_id
+				JOIN server_members sm ON sm.server_id = c.server_id
+				WHERE m.channel_id = $1
+					AND sm.user_id = $2
+					AND m.deleted_at IS NULL
+					AND (m.created_at, m.id) < (
+						SELECT anchor.created_at, anchor.id
+						FROM messages anchor
+						WHERE anchor.id = $3 AND anchor.channel_id = $1
+					)
+				ORDER BY m.created_at DESC, m.id DESC
+				LIMIT $4
+			) page
+			ORDER BY created_at ASC, id ASC
+		`, channelID, userID, options.Before, limit)
+	case options.After != uuid.Nil:
+		rows, err = r.pool.Query(ctx, `
+			SELECT m.id, m.server_id, m.channel_id, m.author_id, m.content, m.created_at, m.updated_at,
+				m.edited_at, m.deleted_at
+			FROM messages m
+			JOIN channels c ON c.id = m.channel_id
+			JOIN server_members sm ON sm.server_id = c.server_id
+			WHERE m.channel_id = $1
+				AND sm.user_id = $2
+				AND m.deleted_at IS NULL
+				AND (m.created_at, m.id) > (
+					SELECT anchor.created_at, anchor.id
+					FROM messages anchor
+					WHERE anchor.id = $3 AND anchor.channel_id = $1
+				)
+			ORDER BY m.created_at ASC, m.id ASC
+			LIMIT $4
+		`, channelID, userID, options.After, limit)
+	default:
+		rows, err = r.pool.Query(ctx, `
+			SELECT *
+			FROM (
+				SELECT m.id, m.server_id, m.channel_id, m.author_id, m.content, m.created_at, m.updated_at,
+					m.edited_at, m.deleted_at
+				FROM messages m
+				JOIN channels c ON c.id = m.channel_id
+				JOIN server_members sm ON sm.server_id = c.server_id
+				WHERE m.channel_id = $1
+					AND sm.user_id = $2
+					AND m.deleted_at IS NULL
+				ORDER BY m.created_at DESC, m.id DESC
+				LIMIT $3
+			) page
+			ORDER BY created_at ASC, id ASC
+		`, channelID, userID, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -234,6 +301,146 @@ func (r *PostgresServerRepository) ListMessagesForChannelUser(ctx context.Contex
 	}
 
 	return messages, nil
+}
+
+func (r *PostgresServerRepository) SearchMessagesForChannelUser(ctx context.Context, channelID, userID uuid.UUID, query string, limit int) ([]models.Message, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT m.id, m.server_id, m.channel_id, m.author_id, m.content, m.created_at, m.updated_at,
+			m.edited_at, m.deleted_at
+		FROM messages m
+		JOIN channels c ON c.id = m.channel_id
+		JOIN server_members sm ON sm.server_id = c.server_id
+		WHERE m.channel_id = $1
+			AND sm.user_id = $2
+			AND m.deleted_at IS NULL
+			AND m.content ILIKE '%' || $3 || '%'
+		ORDER BY m.created_at DESC, m.id DESC
+		LIMIT $4
+	`, channelID, userID, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages, err := scanMessages(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := r.hydrateMessageAttachments(ctx, messages); err != nil {
+		return nil, err
+	}
+
+	return messages, nil
+}
+
+func (r *PostgresServerRepository) UpdateMessageForUser(ctx context.Context, messageID, userID uuid.UUID, content string) (models.Message, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return models.Message{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	row := tx.QueryRow(ctx, `
+		SELECT m.id, m.server_id, m.channel_id, m.author_id, m.content, m.created_at, m.updated_at,
+			m.edited_at, m.deleted_at
+		FROM messages m
+		JOIN server_members sm ON sm.server_id = m.server_id
+		WHERE m.id = $1
+			AND sm.user_id = $2
+			AND m.deleted_at IS NULL
+		FOR UPDATE
+	`, messageID, userID)
+
+	existing, err := scanMessage(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Message{}, ErrMessageNotFound
+		}
+		return models.Message{}, err
+	}
+	if existing.AuthorID != userID {
+		return models.Message{}, ErrForbidden
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO message_edits (id, message_id, old_content, new_content, edited_by)
+		VALUES ($1, $2, $3, $4, $5)
+	`, uuid.New(), existing.ID, existing.Content, content, userID)
+	if err != nil {
+		return models.Message{}, err
+	}
+
+	updated, err := scanMessage(tx.QueryRow(ctx, `
+		UPDATE messages
+		SET content = $3, updated_at = now(), edited_at = now()
+		WHERE id = $1 AND author_id = $2 AND deleted_at IS NULL
+		RETURNING id, server_id, channel_id, author_id, content, created_at, updated_at, edited_at, deleted_at
+	`, messageID, userID, content))
+	if err != nil {
+		return models.Message{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return models.Message{}, err
+	}
+
+	messages := []models.Message{updated}
+	if err := r.hydrateMessageAttachments(ctx, messages); err != nil {
+		return models.Message{}, err
+	}
+
+	return messages[0], nil
+}
+
+func (r *PostgresServerRepository) DeleteMessageForUser(ctx context.Context, messageID, userID uuid.UUID) (models.Message, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return models.Message{}, err
+	}
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	row := tx.QueryRow(ctx, `
+		SELECT m.id, m.server_id, m.channel_id, m.author_id, m.content, m.created_at, m.updated_at,
+			m.edited_at, m.deleted_at
+		FROM messages m
+		JOIN server_members sm ON sm.server_id = m.server_id
+		WHERE m.id = $1
+			AND sm.user_id = $2
+			AND m.deleted_at IS NULL
+		FOR UPDATE
+	`, messageID, userID)
+
+	existing, err := scanMessage(row)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return models.Message{}, ErrMessageNotFound
+		}
+		return models.Message{}, err
+	}
+	if existing.AuthorID != userID {
+		return models.Message{}, ErrForbidden
+	}
+
+	deleted, err := scanMessage(tx.QueryRow(ctx, `
+		UPDATE messages
+		SET deleted_at = now(), updated_at = now()
+		WHERE id = $1 AND author_id = $2 AND deleted_at IS NULL
+		RETURNING id, server_id, channel_id, author_id, content, created_at, updated_at, edited_at, deleted_at
+	`, messageID, userID))
+	if err != nil {
+		return models.Message{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return models.Message{}, err
+	}
+
+	return deleted, nil
 }
 
 func (r *PostgresServerRepository) CreateAttachment(ctx context.Context, attachment models.MessageAttachment) (models.MessageAttachment, error) {
@@ -339,6 +546,8 @@ func scanChannels(rows pgx.Rows) ([]models.Channel, error) {
 
 func scanMessage(row pgx.Row) (models.Message, error) {
 	var message models.Message
+	var editedAt pgtype.Timestamptz
+	var deletedAt pgtype.Timestamptz
 	err := row.Scan(
 		&message.ID,
 		&message.ServerID,
@@ -347,10 +556,14 @@ func scanMessage(row pgx.Row) (models.Message, error) {
 		&message.Content,
 		&message.CreatedAt,
 		&message.UpdatedAt,
+		&editedAt,
+		&deletedAt,
 	)
 	if err != nil {
 		return models.Message{}, err
 	}
+	message.EditedAt = nullableTime(editedAt)
+	message.DeletedAt = nullableTime(deletedAt)
 	return message, nil
 }
 
@@ -465,4 +678,13 @@ func nullableUUID(value pgtype.UUID) *uuid.UUID {
 
 	id := uuid.UUID(value.Bytes)
 	return &id
+}
+
+func nullableTime(value pgtype.Timestamptz) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+
+	t := value.Time
+	return &t
 }

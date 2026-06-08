@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/url"
@@ -33,6 +34,9 @@ var gatewayUpgrader = websocket.Upgrader{
 
 type incomingGatewayEvent struct {
 	Type string `json:"type"`
+	Data struct {
+		ChannelID string `json:"channel_id"`
+	} `json:"data"`
 }
 
 func (s *Server) gatewayWS(w http.ResponseWriter, r *http.Request) {
@@ -62,12 +66,25 @@ func (s *Server) gatewayWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := s.gatewayHub.Register(userID, serverIDs)
+	username := ""
+	if s.authService != nil {
+		if user, err := s.authService.GetMe(r.Context(), userID); err == nil {
+			username = user.Username
+		}
+	}
+
+	if s.presenceService != nil {
+		if presence, err := s.presenceService.SetOnline(r.Context(), userID); err == nil {
+			s.gatewayHub.BroadcastPresence(serverIDs, presence)
+		}
+	}
+
+	client := s.gatewayHub.RegisterUser(userID, username, serverIDs)
 	_ = client.Enqueue(gateway.HelloEvent(userID, client.ServerIDs()))
 
 	errCh := make(chan error, 2)
 	go func() {
-		errCh <- readGatewayPump(conn, client)
+		errCh <- s.readGatewayPump(r.Context(), conn, client)
 	}()
 	go func() {
 		errCh <- writeGatewayPump(conn, client)
@@ -75,6 +92,11 @@ func (s *Server) gatewayWS(w http.ResponseWriter, r *http.Request) {
 
 	<-errCh
 	s.gatewayHub.Unregister(client)
+	if s.presenceService != nil {
+		if presence, err := s.presenceService.SetOffline(context.Background(), userID); err == nil {
+			s.gatewayHub.BroadcastPresence(serverIDs, presence)
+		}
+	}
 	_ = conn.Close()
 }
 
@@ -108,7 +130,7 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("token"))
 }
 
-func readGatewayPump(conn *websocket.Conn, client *gateway.Client) error {
+func (s *Server) readGatewayPump(ctx context.Context, conn *websocket.Conn, client *gateway.Client) error {
 	conn.SetReadLimit(gatewayReadLimit)
 	_ = conn.SetReadDeadline(time.Now().Add(gatewayPongWait))
 	conn.SetPongHandler(func(string) error {
@@ -124,10 +146,37 @@ func readGatewayPump(conn *websocket.Conn, client *gateway.Client) error {
 		switch event.Type {
 		case gateway.EventHeartbeat:
 			client.Enqueue(gateway.HeartbeatAckEvent())
+		case gateway.EventTypingStart, gateway.EventTypingStop:
+			s.handleTypingGatewayEvent(ctx, client, event)
 		default:
 			client.Enqueue(gateway.ErrorEvent("unknown_event", "unsupported gateway event"))
 		}
 	}
+}
+
+func (s *Server) handleTypingGatewayEvent(ctx context.Context, client *gateway.Client, event incomingGatewayEvent) {
+	if s.serverService == nil || s.gatewayHub == nil {
+		client.Enqueue(gateway.ErrorEvent("typing_unavailable", "typing is unavailable"))
+		return
+	}
+
+	channelID, err := uuid.Parse(event.Data.ChannelID)
+	if err != nil {
+		client.Enqueue(gateway.ErrorEvent("invalid_channel", "channel_id must be a valid uuid"))
+		return
+	}
+
+	channel, err := s.serverService.GetChannel(ctx, client.UserID, channelID)
+	if err != nil {
+		client.Enqueue(gateway.ErrorEvent("not_found", "channel not found"))
+		return
+	}
+
+	if event.Type == gateway.EventTypingStart {
+		s.gatewayHub.Broadcast(channel.ServerID, gateway.TypingStartEvent(channel.ServerID, channel.ID, client.UserID, client.Username))
+		return
+	}
+	s.gatewayHub.Broadcast(channel.ServerID, gateway.TypingStopEvent(channel.ID, client.UserID))
 }
 
 func writeGatewayPump(conn *websocket.Conn, client *gateway.Client) error {

@@ -7,7 +7,7 @@ import (
 )
 
 func TestFileRoutesRequireAuth(t *testing.T) {
-	router := NewRouter(nil, nil, nil, nil, nil)
+	router := NewRouter(nil, nil, nil, nil, nil, nil)
 	request := httptest.NewRequest(http.MethodPost, "/files/upload", nil)
 	response := httptest.NewRecorder()
 

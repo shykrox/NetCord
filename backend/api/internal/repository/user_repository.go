@@ -28,10 +28,10 @@ func NewPostgresUserRepository(pool *pgxpool.Pool) *PostgresUserRepository {
 
 func (r *PostgresUserRepository) Create(ctx context.Context, user models.User) (models.User, error) {
 	row := r.pool.QueryRow(ctx, `
-		INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, username, email, password_hash, display_name, avatar_url, status, created_at, updated_at
-	`, user.ID, user.Username, user.Email, user.PasswordHash, user.DisplayName, user.AvatarURL, user.Status)
+		INSERT INTO users (id, username, email, password_hash, display_name, avatar_url, status, is_bot)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, username, email, password_hash, display_name, avatar_url, status, is_bot, created_at, updated_at
+	`, user.ID, user.Username, user.Email, user.PasswordHash, user.DisplayName, user.AvatarURL, user.Status, user.IsBot)
 
 	created, err := scanUser(row)
 	if err != nil {
@@ -46,7 +46,7 @@ func (r *PostgresUserRepository) Create(ctx context.Context, user models.User) (
 
 func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (models.User, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, username, email, password_hash, display_name, avatar_url, status, created_at, updated_at
+		SELECT id, username, email, password_hash, display_name, avatar_url, status, is_bot, created_at, updated_at
 		FROM users
 		WHERE email = $1
 	`, email)
@@ -56,7 +56,7 @@ func (r *PostgresUserRepository) GetByEmail(ctx context.Context, email string) (
 
 func (r *PostgresUserRepository) GetByID(ctx context.Context, id uuid.UUID) (models.User, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, username, email, password_hash, display_name, avatar_url, status, created_at, updated_at
+		SELECT id, username, email, password_hash, display_name, avatar_url, status, is_bot, created_at, updated_at
 		FROM users
 		WHERE id = $1
 	`, id)
@@ -85,6 +85,7 @@ func scanUser(row pgx.Row) (models.User, error) {
 		&user.DisplayName,
 		&user.AvatarURL,
 		&user.Status,
+		&user.IsBot,
 		&user.CreatedAt,
 		&user.UpdatedAt,
 	)

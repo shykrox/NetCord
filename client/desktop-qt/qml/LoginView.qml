@@ -53,7 +53,7 @@ Rectangle {
             TextField {
                 id: apiBaseUrl
                 text: netcord.apiBaseUrl
-                placeholderText: "Backend URL"
+                placeholderText: "API URL, for example http://127.0.0.1:8080"
                 Layout.fillWidth: true
                 onEditingFinished: netcord.apiBaseUrl = text
             }
@@ -108,6 +108,7 @@ Rectangle {
                 color: "#ffb4b4"
                 wrapMode: Text.Wrap
                 Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
             }
         }
     }

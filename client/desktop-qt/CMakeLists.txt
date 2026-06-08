@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick Network WebSockets)
+find_package(Qt6 REQUIRED COMPONENTS Quick Network WebSockets Sql)
 
 qt_add_executable(NetCordDesktop
     src/main.cpp
@@ -28,6 +28,7 @@ target_link_libraries(NetCordDesktop
         Qt6::Quick
         Qt6::Network
         Qt6::WebSockets
+        Qt6::Sql
 )
 
 set_target_properties(NetCordDesktop PROPERTIES

@@ -10,6 +10,7 @@ const (
 	ServerRoleOwner  = "owner"
 	ServerRoleMember = "member"
 	ChannelTypeText  = "text"
+	ChannelTypeVoice = "voice"
 )
 
 type Server struct {
@@ -86,6 +87,8 @@ type Message struct {
 	Attachments []MessageAttachment
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	EditedAt    *time.Time
+	DeletedAt   *time.Time
 }
 
 type PublicMessage struct {
@@ -96,6 +99,8 @@ type PublicMessage struct {
 	Content     string             `json:"content"`
 	Attachments []PublicAttachment `json:"attachments"`
 	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
+	EditedAt    *time.Time         `json:"edited_at"`
 }
 
 func (m Message) Public() PublicMessage {
@@ -107,6 +112,8 @@ func (m Message) Public() PublicMessage {
 		Content:     m.Content,
 		Attachments: publicAttachments(m.Attachments),
 		CreatedAt:   m.CreatedAt,
+		UpdatedAt:   m.UpdatedAt,
+		EditedAt:    m.EditedAt,
 	}
 }
 

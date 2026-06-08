@@ -1,282 +1,94 @@
 # NetCord API
 
-Base URL for local development:
+Base local URL:
 
 ```text
 http://127.0.0.1:8080
 ```
 
-All error responses use this shape:
-
-```json
-{
-  "error": {
-    "code": "validation_error",
-    "message": "request validation failed",
-    "fields": {
-      "email": "email must be valid"
-    }
-  }
-}
-```
-
-## GET /health
-
-Returns API health.
-
-Response:
-
-```json
-{
-  "service": "netcord-api",
-  "status": "ok"
-}
-```
-
-## POST /auth/register
-
-Request:
-
-```json
-{
-  "username": "shykrox",
-  "email": "user@example.com",
-  "password": "strong-password"
-}
-```
-
-Response `201 Created`:
-
-```json
-{
-  "token": "jwt",
-  "user": {
-    "id": "uuid",
-    "username": "shykrox",
-    "email": "user@example.com",
-    "display_name": "shykrox",
-    "avatar_url": null,
-    "status": "offline",
-    "created_at": "timestamp"
-  }
-}
-```
-
-## POST /auth/login
-
-Request:
-
-```json
-{
-  "email": "user@example.com",
-  "password": "strong-password"
-}
-```
-
-Response `200 OK`: same shape as register.
-
-Invalid email or password returns `401 Unauthorized` without revealing whether the email exists.
-
-## GET /users/me
-
-Headers:
+Most endpoints require:
 
 ```text
 Authorization: Bearer <token>
 ```
 
-Response `200 OK`:
+Errors use:
 
 ```json
-{
-  "id": "uuid",
-  "username": "shykrox",
-  "email": "user@example.com",
-  "display_name": "shykrox",
-  "avatar_url": null,
-  "status": "offline",
-  "created_at": "timestamp"
-}
+{"error":{"code":"validation_error","message":"request validation failed","fields":{}}}
 ```
 
-## POST /servers
+## Auth and Users
 
-Requires `Authorization: Bearer <token>`.
+- `GET /health`
+- `POST /auth/register` with `username`, `email`, `password`
+- `POST /auth/login` with `email`, `password`
+- `GET /users/me`
+- `PATCH /users/me/presence` with `status` (`online`, `idle`, `dnd`, `offline`) and optional `custom_status`
 
-Request:
+## Servers and Channels
 
-```json
-{
-  "name": "NetCord",
-  "description": "private server"
-}
-```
+- `POST /servers` with `name`, optional `description`
+- `GET /servers`
+- `GET /servers/{server_id}`
+- `POST /servers/{server_id}/channels` with `name`, optional `type` (`text` or `voice`)
+- `GET /servers/{server_id}/channels`
 
-Response `201 Created`:
+The server creator is inserted as owner. Users can only read servers/channels where they are members.
 
-```json
-{
-  "id": "uuid",
-  "owner_id": "uuid",
-  "name": "NetCord",
-  "description": "private server",
-  "icon_url": null,
-  "created_at": "timestamp"
-}
-```
+## Messages
 
-The authenticated creator is inserted into `server_members` with role `owner`.
+- `GET /channels/{channel_id}/messages?before=<message_id>&after=<message_id>&limit=50`
+- `GET /channels/{channel_id}/messages/search?q=<query>&limit=50`
+- `POST /channels/{channel_id}/messages` with `content` and optional `attachments`
+- `PATCH /messages/{message_id}` with `content`
+- `DELETE /messages/{message_id}`
 
-## GET /servers
+Only text channels accept messages. Delete is soft delete; deleted messages are hidden from list/search. Only the author can edit/delete for now.
 
-Requires `Authorization: Bearer <token>`.
+## Files
 
-Response `200 OK`:
+- `POST /files/upload` as `multipart/form-data` field `file`
+- `GET /files/{id}`
 
-```json
-{
-  "servers": []
-}
-```
+Files are stored privately in MinIO/S3. API responses expose only attachment IDs and `/files/{id}` download URLs.
 
-Only servers where the authenticated user is a member are returned.
+## Friends and DMs
 
-## GET /servers/{server_id}
+- `POST /friends/requests` with `recipient_id`
+- `GET /friends/requests`
+- `POST /friends/requests/{id}/accept`
+- `POST /friends/requests/{id}/decline`
+- `GET /friends`
+- `DELETE /friends/{user_id}`
+- `POST /dm` with `member_ids`, optional `name`
+- `GET /dm`
+- `GET /dm/{conversation_id}/messages?limit=50`
+- `POST /dm/{conversation_id}/messages` with `content`
 
-Requires `Authorization: Bearer <token>`.
+DM access is restricted to conversation members. Blocked users cannot be added to a DM.
 
-Returns the server only if the authenticated user is a member. Non-members receive `404 Not Found`.
+## Roles, Permissions, Invites
 
-## POST /servers/{server_id}/channels
+- `POST /servers/{id}/roles`
+- `GET /servers/{id}/roles`
+- `PATCH /roles/{id}`
+- `DELETE /roles/{id}`
+- `PUT /servers/{id}/members/{user_id}/roles/{role_id}`
+- `DELETE /servers/{id}/members/{user_id}/roles/{role_id}`
+- `POST /servers/{id}/invites`
+- `GET /invites/{code}`
+- `POST /invites/{code}/join`
 
-Requires `Authorization: Bearer <token>`.
+Owners have all permissions. `ADMINISTRATOR` bypasses checks. Role management requires `MANAGE_ROLES`; invite creation requires `CREATE_INVITE`.
 
-Request:
+## Voice
 
-```json
-{
-  "name": "general"
-}
-```
+- `POST /voice/join` with `channel_id`
+- `POST /voice/leave` with `channel_id`
 
-Response `201 Created`:
+Voice join requires a `voice` channel, membership, `CONNECT_VOICE`, and LiveKit env config. The join response includes `url`, `token`, `room`, `server_id`, `channel_id`, `user_id`.
 
-```json
-{
-  "id": "uuid",
-  "server_id": "uuid",
-  "name": "general",
-  "type": "text",
-  "position": 0,
-  "created_at": "timestamp"
-}
-```
+## AI Commands
 
-Only text channels are supported for now.
-
-## GET /servers/{server_id}/channels
-
-Requires `Authorization: Bearer <token>`.
-
-Response `200 OK`:
-
-```json
-{
-  "channels": []
-}
-```
-
-## GET /channels/{channel_id}/messages
-
-Requires `Authorization: Bearer <token>`.
-
-Response `200 OK`:
-
-```json
-{
-  "messages": [
-    {
-      "id": "uuid",
-      "server_id": "uuid",
-      "channel_id": "uuid",
-      "author_id": "uuid",
-      "content": "hello",
-      "attachments": [],
-      "created_at": "timestamp"
-    }
-  ]
-}
-```
-
-Only members of the channel's server can read messages.
-
-## POST /channels/{channel_id}/messages
-
-Requires `Authorization: Bearer <token>`.
-
-Request:
-
-```json
-{
-  "content": "hello",
-  "attachments": ["attachment-uuid"]
-}
-```
-
-Response `201 Created`:
-
-```json
-{
-  "id": "uuid",
-  "server_id": "uuid",
-  "channel_id": "uuid",
-  "author_id": "uuid",
-  "content": "hello",
-  "attachments": [
-    {
-      "id": "uuid",
-      "original_filename": "hello.txt",
-      "content_type": "text/plain; charset=utf-8",
-      "size_bytes": 12,
-      "download_url": "/files/uuid",
-      "created_at": "timestamp"
-    }
-  ],
-  "created_at": "timestamp"
-}
-```
-
-`attachments` is optional. Each attachment ID must come from `POST /files/upload`, must belong to the authenticated user, and must not already be attached to another message.
-
-## POST /files/upload
-
-Requires `Authorization: Bearer <token>`.
-
-Uploads one private attachment object to MinIO using `multipart/form-data`.
-
-Request:
-
-```text
-file=<binary file>
-```
-
-Response `201 Created`:
-
-```json
-{
-  "id": "uuid",
-  "original_filename": "hello.txt",
-  "content_type": "text/plain; charset=utf-8",
-  "size_bytes": 12,
-  "download_url": "/files/uuid",
-  "created_at": "timestamp"
-}
-```
-
-The API detects MIME type server-side and stores the object using a non-predictable MinIO object key. Bucket and object key are never returned to clients.
-
-## GET /files/{id}
-
-Requires `Authorization: Bearer <token>`.
-
-Downloads an attachment through the API. The authenticated user can access the file if they uploaded it or if it is attached to a message in a server where they are a member.
+Posting `/ask <prompt>` or `/draw <prompt>` in a text channel creates an `ai_jobs` queue row and broadcasts `job.progress`. Execution workers and ComfyUI output attachment are foundation work for the next implementation step.
